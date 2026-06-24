@@ -1,0 +1,14 @@
+# Nitpick cache and build artifacts
+.npk-cache/
+*.ll
+*.bc
+*.s
+*.ptx
+*.wasm
+*.o
+*.out
+a.out
+
+# Standard OS files
+.DS_Store
+Thumbs.db
