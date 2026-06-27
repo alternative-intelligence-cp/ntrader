@@ -1,0 +1,5 @@
+use "unsafe.npk".*;
+
+pub trait:Clock = {
+    func:get_time = int64(any:self);
+};

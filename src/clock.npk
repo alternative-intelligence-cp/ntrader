@@ -1,0 +1,13 @@
+use "unsafe.npk".*;
+use "traits.npk".*;
+
+pub struct:WallClock = {
+    int32:dummy;
+};
+
+
+pub struct:EventClock = {
+    int64:current_time;
+};
+
+

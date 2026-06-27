@@ -1,0 +1,143 @@
+use "events.npk".*;
+use "unsafe.npk".*;
+
+
+extern "libnitpick_runtime" {
+    func:npk_atomic_int32_load = int32(void*:atomic_ptr);
+    func:npk_atomic_int32_store = void(void*:atomic_ptr, int32:val);
+    func:npk_atomic_int32_compare_exchange_strong = bool(void*:atomic_ptr, void*:expected_ptr, int32:desired);
+}
+extern "libc" {
+    func:sys = int64(int64:syscall_num, int64:arg1, int64:arg2, int64:arg3, int64:arg4, int64:arg5, int64:arg6);
+    func:sys_nanosleep = int32(int64:req, int64:rem);
+    func:puts = int32(string:s);
+    func:sleep = int32(int32:seconds);
+}
+
+// System logging (non-blocking)
+pub struct:LogEntry = {
+    int64:timestamp;
+    tbb32:event_code;
+    // We can add up to ~40 bytes of payload without breaking cache lines too badly
+    int64:payload1;
+    int64:payload2;
+    int64:payload3;
+    int32:ready;
+};
+
+// We will use LockFreeQueue as our TelemetryQueue.
+// Since LockFreeQueue stores int64, we will allocate LogEntry structs on the Arena,
+// or we will pack the event code and timestamp into a single int64 if possible.
+// For now, we will pack a pointer to the LogEntry (allocated via some fast slab).
+// BUT wait, telemetry must be non-blocking and zero-allocation!
+// So we should pre-allocate an array of LogEntry structs and use an atomic index.
+
+pub struct:TelemetryBuffer = {
+    atomic<int32>->:head;
+    atomic<int32>->:tail;
+    // We can't do inline arrays of structs easily yet, so we will store pointers 
+    // or pack data into two parallel arrays if needed.
+    // For simplicity, since Nitpick doesn't have inline arrays, we will allocate
+    // the buffer during init.
+    LogEntry->:entries;
+    int32:capacity;
+};
+
+pub func:telemetry_init = TelemetryBuffer(int32:capacity) {
+    TelemetryBuffer:buf;
+    buf.head = atomic_new(0i32);
+    buf.tail = atomic_new(0i32);
+    buf.capacity = capacity;
+    
+    // Allocate buffer array
+    int64:size = cast_unchecked<int64>(capacity) * cast_unchecked<int64>(@sizeof(LogEntry));
+    int64:ptr = raw sys!!(9i64 /* SYS_MMAP */, 0i64, size, 3i64, 34i64, -1i64, 0i64);
+    buf.entries = cast_unchecked<LogEntry->>(ptr);
+    
+    pass buf;
+};
+
+// Global telemetry buffer
+int64:global_telemetry_buf_addr = 0i64;
+
+pub func:set_global_telemetry = NIL(TelemetryBuffer->:buf) {
+    global_telemetry_buf_addr = cast_unchecked<int64>(buf);
+    pass NIL;
+};
+
+pub func:log_event = NIL(tbb32:code, int64:p1, int64:p2, int64:p3) {
+    if (global_telemetry_buf_addr == 0i64) { pass NIL; }
+    
+    TelemetryBuffer->:buf = cast_unchecked<TelemetryBuffer->>(global_telemetry_buf_addr);
+    
+    bool:success = false;
+    int32:h = npk_atomic_int32_load(cast_unchecked<any->>(buf->head));
+    int32:next_h = 0i32;
+    
+    while (success == false) {
+        int32:t = npk_atomic_int32_load(cast_unchecked<any->>(buf->tail));
+        next_h = h + 1i32;
+        if (next_h >= buf->capacity) { next_h = 0i32; }
+        
+        if (next_h == t) {
+            // Buffer full, drop log
+            pass NIL;
+        }
+        
+        success = npk_atomic_int32_compare_exchange_strong(
+            cast_unchecked<any->>(buf->head),
+            cast_unchecked<any->>(@h),
+            next_h
+        );
+    }
+    
+    int64:offset = cast_unchecked<int64>(h) * cast_unchecked<int64>(@sizeof(LogEntry));
+    int64:base = cast_unchecked<int64>(buf->entries);
+    LogEntry->:entry = cast_unchecked<LogEntry->>(base + offset);
+    
+    entry->timestamp = 0i64;
+    entry->event_code = code;
+    entry->payload1 = p1;
+    entry->payload2 = p2;
+    entry->payload3 = p3;
+    
+    npk_atomic_int32_store(cast_unchecked<any->>(@entry->ready), 1i32);
+    
+    pass NIL;
+};
+
+pub func:telemetry_worker = int64(any->:arg) {
+    TelemetryBuffer->:buf = cast_unchecked<TelemetryBuffer->>(arg);
+    
+    while (1i32 == 1i32) {
+        int32:h = npk_atomic_int32_load(cast_unchecked<any->>(buf->head));
+        int32:t = npk_atomic_int32_load(cast_unchecked<any->>(buf->tail));
+        
+        if (h == t) {
+            // Empty, sleep
+            drop sleep(0i32);
+            continue;
+        }
+        
+        int64:offset = cast_unchecked<int64>(t) * cast_unchecked<int64>(@sizeof(LogEntry));
+        int64:base = cast_unchecked<int64>(buf->entries);
+        LogEntry->:entry = cast_unchecked<LogEntry->>(base + offset);
+        
+        int32:rdy = npk_atomic_int32_load(cast_unchecked<any->>(@entry->ready));
+        if (rdy == 0i32) {
+            drop sleep(0i32);
+            continue;
+        }
+        
+        // Write to stdout (1)
+        drop puts("LOG EVENT\n");
+        
+        npk_atomic_int32_store(cast_unchecked<any->>(@entry->ready), 0i32);
+        
+        int32:next_t = t + 1i32;
+        if (next_t >= buf->capacity) { next_t = 0i32; }
+        drop npk_atomic_int32_store(cast_unchecked<any->>(buf->tail), next_t);
+    }
+    
+    pass 0i64;
+};

@@ -1,0 +1,97 @@
+use "unsafe.npk".*;
+Rules<int32>:r_ring_bounds = { $ >= 0i32, $ < 1024i32 };
+
+pub struct:RingBuffer = {
+    tfp64[1024]:data;
+    int32:head;
+    int32:count;
+    tfp64:sum;
+};
+
+pub func:ringbuffer_init = RingBuffer() {
+    RingBuffer:rb;
+    rb.head = 0i32;
+    rb.count = 0i32;
+    rb.sum = 0.0tf;
+    
+    
+    int32:i = 0i32;
+    while (i < 1024i32) {
+        int64:base_addr = cast_unchecked<int64>(@rb->data);
+        int64:elem_addr = base_addr + cast_unchecked<int64>(i) * cast_unchecked<int64>(@sizeof(tfp64));
+        tfp64->:elem_ptr = cast_unchecked<tfp64->>(elem_addr);
+        <-elem_ptr = 0.0tf;
+        i = i + 1i32;
+    }
+    
+    pass rb;
+};
+
+pub func:ringbuffer_push = NIL(RingBuffer->:rb, tfp64:val) {
+    if (val == ERR) {
+        rb->head = 0i32;
+        rb->count = 0i32;
+        rb->sum = 0.0tf;
+        int32:i = 0i32;
+        while (i < 1024i32) {
+            int64:base_addr = cast_unchecked<int64>(@rb->data);
+            int64:elem_addr = base_addr + cast_unchecked<int64>(i) * cast_unchecked<int64>(@sizeof(tfp64));
+            tfp64->:elem_ptr = cast_unchecked<tfp64->>(elem_addr);
+            <-elem_ptr = 0.0tf;
+            i = i + 1i32;
+        }
+        pass NIL;
+    }
+    
+    int64:base_addr = cast_unchecked<int64>(@rb->data);
+    int64:dest_addr = base_addr + cast_unchecked<int64>(rb->head) * cast_unchecked<int64>(@sizeof(tfp64));
+    tfp64->:dest = cast_unchecked<tfp64->>(dest_addr);
+    
+    if (rb->count == 1024i32) {
+        rb->sum = rb->sum - (<-dest);
+    }
+    
+    <-dest = val;
+    rb->sum = rb->sum + val;
+    
+    rb->head = (rb->head + 1i32) % 1024i32;
+    if (rb->count < 1024i32) {
+        rb->count = rb->count + 1i32;
+    }
+    
+    if (rb->head == 0i32) {
+        tfp64:new_sum = 0.0tf;
+        int32:idx = 0i32;
+        while (idx < 1024i32) {
+            int64:c_addr = base_addr + cast_unchecked<int64>(idx) * cast_unchecked<int64>(@sizeof(tfp64));
+            tfp64->:c_ptr = cast_unchecked<tfp64->>(c_addr);
+            new_sum = new_sum + (<-c_ptr);
+            idx = idx + 1i32;
+        }
+        rb->sum = new_sum;
+    }
+    pass NIL;
+};
+
+pub func:ringbuffer_get = tfp64(RingBuffer->:rb, int32:age) {
+    if (age < 0i32 || age >= rb->count) {
+        fail cast_unchecked<tbb32>(1i32);
+    }
+    
+    int32:idx = (rb->head - 1i32 - age + 1024i32) % 1024i32;
+    int64:base_addr = cast_unchecked<int64>(@rb->data);
+    int64:src_addr = base_addr + cast_unchecked<int64>(idx) * cast_unchecked<int64>(@sizeof(tfp64));
+    tfp64->:src = cast_unchecked<tfp64->>(src_addr);
+    
+    tfp64:ret_val = <-src;
+    pass ret_val;
+};
+
+pub func:ringbuffer_average = tfp64(RingBuffer->:rb) {
+    if (rb->count == 0i32) {
+        pass 0.0tf;
+    }
+    
+    tfp64:div = cast_unchecked<tfp64>(rb->count);
+    pass rb->sum / div;
+};

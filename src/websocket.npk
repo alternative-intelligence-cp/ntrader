@@ -1,0 +1,44 @@
+use "network.npk".*;
+
+pub struct:WebSocket = {
+    TcpSocket:sock;
+    int32:state; // 0 = connecting, 1 = connected, 2 = closed
+};
+
+extern "libc" {
+    func:getrandom = int64(void*:buf, int64:buflen, int32:flags);
+}
+
+extern "libnitpick_runtime" {
+    func:npk_core_alloc = int64(int64:size);
+    func:npk_core_dalloc = NIL(int64:ptr);
+}
+
+pub func:generate_ws_key = string() {
+    int64:buf_raw = npk_core_alloc(16i64);
+    int8->:buf = cast_unchecked<int8->>(buf_raw);
+    
+    int64:ret = getrandom(buf, 16i64, 0i32);
+    if (ret < 0i64) {
+        npk_core_dalloc(buf_raw);
+        fail 102i32;
+    }
+    
+    // Convert 16 bytes of entropy to Base64 (stubbed)
+    string:key = "dGhlIHNhbXBsZSBub25jZQ==";
+    
+    npk_core_dalloc(buf_raw);
+    pass key;
+};
+
+pub func:parse_ws_frame = int32(wild int8->:frame_buf, int64:len) {
+    // Opcode mapping
+    // Text=1, Binary=2, Close=8, Ping=9, Pong=10
+    
+    // Read first byte for FIN and Opcode
+    // Endianness Fix: Extended payload lengths
+    // Using int64 masking block XOR
+    
+    // This is the skeleton for frame parsing
+    pass 0i32;
+};

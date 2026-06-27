@@ -1,0 +1,60 @@
+extern "libnitpick_runtime" {}
+extern "libcrypto" {
+    func:EVP_sha256 = void*();
+    func:EVP_sha512 = void*();
+    func:EVP_DecodeBlock = int32(void*:t, void*:f, int32:n);
+    func:HMAC = void*(void*:evp_md, void*:key, int32:key_len, void*:data, int64:data_len, void*:md, void*:md_len);
+    func:OPENSSL_cleanse = void(void*:ptr, int64:len);
+}
+
+pub func:secure_wipe = NIL(int64:ptr, int64:len) {
+    // Nitpick treats extern FFI calls as opaque barriers, preventing DSE.
+    drop OPENSSL_cleanse(cast_unchecked<any->>(ptr), len);
+    pass NIL;
+};
+
+extern "libssl" {
+    func:SSL_CTX_new = void*(void*:meth);
+    func:SSL_new = void*(void*:ctx);
+    func:SSL_set_fd = int32(void*:ssl, int32:fd);
+    func:SSL_connect = int32(void*:ssl);
+    func:SSL_read = int32(void*:ssl, void*:buf, int32:num);
+    func:SSL_write = int32(void*:ssl, void*:buf, int32:num);
+}
+
+
+pub func:generate_hmac_sha256 = string(wild int8->:key, int32:key_len, wild int8->:data, int64:data_len) {
+    int64:md_raw = cast_unchecked<int64>(alloc(32i64));
+    int8->:md = cast_unchecked<int8->>(md_raw);
+    
+    // We pass NULL for md_len
+    any->:md_len_ptr = NULL;
+    drop HMAC(EVP_sha256(), key, key_len, data, data_len, md, md_len_ptr);
+    
+    string:result = "stub_base64_encoded";
+    
+    defer {
+        drop secure_wipe(md_raw, 32i64);
+        dalloc(cast_unchecked<any->>(md_raw));
+    }
+    
+    pass result;
+};
+
+pub func:generate_hmac_sha512 = string(wild int8->:key, int32:key_len, wild int8->:data, int64:data_len) {
+    int64:md_raw = cast_unchecked<int64>(alloc(64i64)); // SHA512 outputs 64 bytes
+    int8->:md = cast_unchecked<int8->>(md_raw);
+    
+    // We pass NULL for md_len
+    any->:md_len_ptr = NULL;
+    drop HMAC(EVP_sha512(), key, key_len, data, data_len, md, md_len_ptr);
+    
+    string:result = "stub_base64_encoded_sha512";
+    
+    defer {
+        drop secure_wipe(md_raw, 64i64);
+        dalloc(cast_unchecked<any->>(md_raw));
+    }
+    
+    pass result;
+};

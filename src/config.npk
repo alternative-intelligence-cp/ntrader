@@ -1,0 +1,6 @@
+pub struct:Config = {
+    int32:rsi_period;
+    int32:ma_window;
+    tfp64:leverage_cap;
+    tfp64:confidence_threshold;
+};

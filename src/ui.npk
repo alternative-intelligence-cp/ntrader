@@ -1,0 +1,53 @@
+use "snapshot.npk".*;
+use "context.npk".*;
+
+extern "libc" {
+    func:tcsetattr = int32(int32:fd, int32:optional_actions, void*:termios_p);
+    func:sleep = int32(int32:seconds);
+}
+
+pub func:termios_restore = NIL() {
+    // STUB: Safely restore termios to ICANON mode.
+    // In actual implementation, we would pass the original termios struct saved during boot.
+    // This prevents hanging the terminal in a broken raw/no-echo state.
+    pass NIL;
+};
+
+pub func:render_tui = NIL(int64:snapshot_addr) {
+    // Scaffold: ANSI escape sequence rendering pipeline for live OrderBook and Wallet.
+    // Reads exclusively from the Snapshot ReadOnlyBuffer.
+    pass NIL;
+};
+
+pub func:ui_worker_thread = any->(any->:arg) {
+    WorkerContext->:ctx = cast_unchecked<WorkerContext->>(arg);
+    
+    while (true) {
+        // Check shutdown flag
+        int32:is_shutdown = npk_atomic_int32_load(cast_unchecked<any->>(ctx->shutdown_flag));
+        if (is_shutdown == 1i32) {
+            break;
+        }
+        
+        // Read snapshot ptr (Thread Isolation: Snapshot Pattern)
+        ReadOnlySnapshot:snap = raw snapshot_read(ctx->snapshot_ptr);
+        int64:snap_addr = cast_unchecked<int64>(snap.arena);
+        if (snap_addr > 0i64) {
+            drop render_tui(snap_addr);
+        }
+        
+        int32:file_changed = 0i32; // STUB: inotify/file-watch event
+        if (file_changed == 1i32) {
+            // Double-Buffering: Allocate entirely new config block
+            // Config->:new_cfg = cast_unchecked<Config->>(alloc(32i64));
+            // drop parse_toml("config.toml", new_cfg);
+            // Swap pointer atomically
+            // STUB: atomic_store(ctx->active_config_addr, cast_unchecked<int64>(new_cfg));
+        }
+        
+        // Sleep to throttle rendering (prevent 100% CPU on UI thread)
+        drop sleep(0i32);
+    }
+    
+    pass cast_unchecked<any->>(0i64);
+};

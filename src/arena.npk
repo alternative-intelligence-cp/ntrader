@@ -1,0 +1,63 @@
+use "unsafe.npk".*;
+
+pub struct:TCBHandle = {
+    int32:generation;
+    int32:index;
+};
+
+pub struct:OrderNode = {
+    int64:price;
+    int64:qty;
+    int32:generation;
+    int32:padding;
+};
+
+pub struct:GenNode = {
+    int32:generation;
+};
+
+pub struct:TCBArena = {
+    wild any->:memory;
+    int64:capacity;
+    atomic<int64>->:next_free;
+    int32:generation;
+};
+
+pub func:tcb_arena_init = TCBArena(int64:count) {
+    TCBArena:arena;
+    arena.capacity = count;
+    arena.memory = cast_unchecked<any->>(calloc(count, @sizeof(OrderNode)));
+    arena.next_free = atomic_new(0i64);
+    pass arena;
+};
+
+pub func:tcb_arena_alloc = TCBHandle(TCBArena:arena) {
+    TCBHandle:h;
+    // ... STUB: increment atomic next_free and return handle ...
+    h.index = 0i32;
+    h.generation = 1i32;
+    pass h;
+};
+
+pub func:tcb_arena_get = OrderNode->(TCBArena:arena, TCBHandle:h) {
+    if (h.index < 0i32 || cast_unchecked<int64>(h.index) >= arena.capacity) {
+        pass cast_unchecked<OrderNode->>(0i64);
+    }
+    int64:idx = cast_unchecked<int64>(h.index);
+    int64:offset = idx * @sizeof(OrderNode);
+    int64:base_addr = cast_unchecked<int64>(arena.memory);
+    int64:node_addr = base_addr + offset;
+    
+    // Safely verify generation before casting the full pointer
+    int64:gen_offset = @offsetof(OrderNode, generation);
+
+    int64:gen_addr = node_addr + gen_offset;
+    GenNode->:gen_ptr = cast_unchecked<GenNode->>(gen_addr);
+    
+    OrderNode->:ret = cast_unchecked<OrderNode->>(0i64);
+    if (gen_ptr->generation == h.generation) {
+        ret = cast_unchecked<OrderNode->>(node_addr);
+    }
+
+    pass ret;
+};

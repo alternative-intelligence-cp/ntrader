@@ -1,0 +1,62 @@
+use "network.npk".*;
+use "crypto.npk".*;
+use "unsafe.npk".*;
+use "traits.npk".*;
+
+extern "libc" {
+    func:clock_gettime = int32(int32:clk_id, void*:tp);
+    func:SSL_get_error = int32(void*:ssl, int32:ret);
+}
+
+extern "libnitpick_runtime" {
+    func:npk_core_alloc = int64(int64:size);
+    func:npk_core_dalloc = NIL(int64:ptr);
+}
+
+pub struct:RestClient = {
+    TcpSocket:sock;
+    any->:ssl;
+    any->:ssl_ctx;
+};
+
+pub struct:RateLimiter = {
+    int64:tokens;
+    int64:capacity;
+    int64:fill_rate_ns;
+    int64:last_update_ns;
+};
+
+pub func:rest_request = int32(RestClient:client, wild int8->:req_buf, int32:req_len) {
+    int32:ret = SSL_write(client.ssl, req_buf, req_len);
+    if (ret <= 0i32) {
+        int32:err = SSL_get_error(cast_unchecked<any->>(client.ssl), ret);
+        if (err == 2i32 || err == 3i32) {
+            pass 0i32;
+        }
+        pass -1i32;
+    }
+    pass ret;
+};
+
+pub func:limiter_check = NIL(RateLimiter->:limiter, dyn Clock:clk) {
+    int64:current_ns = clk->get_time();
+    
+    int64:elapsed = current_ns - limiter->last_update_ns;
+    int64:added = elapsed / limiter->fill_rate_ns;
+    
+    limiter->tokens = limiter->tokens + added;
+    if (limiter->tokens >= limiter->capacity) {
+        limiter->tokens = limiter->capacity;
+        limiter->last_update_ns = current_ns;
+    } else {
+        limiter->last_update_ns = limiter->last_update_ns + (added * limiter->fill_rate_ns);
+    }
+    
+    if (limiter->tokens <= 0i64) {
+        fail 429i32;
+    }
+    
+    limiter->tokens = limiter->tokens - 1i64;
+    
+    pass NIL;
+};

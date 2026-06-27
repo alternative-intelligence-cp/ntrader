@@ -1,0 +1,133 @@
+use "exchange.npk".*;
+use "crypto.npk".*;
+use "events.npk".*;
+
+extern "libc" {
+    func:mlock = int32(void*:addr, int64:len);
+    func:munlock = int32(void*:addr, int64:len);
+    func:snprintf = int32(void*:str, int64:size, string:format, string:arg1, string:arg2);
+}
+
+extern "libnitpick_runtime" {
+    func:npk_core_alloc = int64(int64:size);
+    func:npk_core_dalloc = void(int64:ptr);
+}
+
+pub struct:KrakenClient = {
+    int64:raw_key_addr;
+    int64:signed_token_addr;
+    int32:key_len;
+    int32:token_len;
+    LockFreeQueue:events;
+};
+
+impl:ExchangeClient:for:KrakenClient = {
+    func:auth = NIL(any:client) {
+        pass NIL;
+    };
+    
+    func:sign_request = string(any:client, string:path, string:data) {
+        pass raw kraken_sign_request(client, path, data);
+    };
+    func:submit_order = NIL(any:client, Order:order) { pass NIL; };
+    func:cancel_order = NIL(any:client) { pass NIL; };
+};
+
+pub func:kraken_sign_request = string(any:client, string:path, string:data) {
+        KrakenClient:kraken = cast_unchecked<KrakenClient>(client);
+        
+        // Allocate raw key bypassing NLL
+        int64:raw_key_addr = npk_core_alloc(1024i64); 
+        int8->:raw_key = cast_unchecked<int8->>(raw_key_addr);
+        
+        defer {
+            OPENSSL_cleanse(cast_unchecked<any->>(raw_key), 1024i64);
+            drop munlock(raw_key, 1024i64);
+            npk_core_dalloc(raw_key_addr);
+        }
+        
+        // MLOCK API Secrets
+        int32:mlock_ret = mlock(cast_unchecked<any->>(raw_key), 1024i64);
+        if (mlock_ret != 0i32) {
+            fail cast_unchecked<tbb32>(100i32);
+        }
+        
+        // STUB: int32:dec_len = EVP_DecodeBlock(raw_key, kraken.api_secret, 1024i32);
+        int32:dec_len = 64i32; 
+        
+        // Kraken API-Sign: HMAC_SHA512(URI_path + SHA256(nonce + POST_data), Base64_Decode(api_secret))
+        // Since we don't have strings in stdlib easily concatenated here, we use a stub for string concat.
+        int64:concat_data_addr = npk_core_alloc(2048i64);
+        int8->:concat_data = cast_unchecked<int8->>(concat_data_addr);
+        defer {
+            npk_core_dalloc(concat_data_addr);
+        }
+        
+        int32:written = snprintf(cast_unchecked<any->>(concat_data), 2048i64, "%s%s", path, data);
+        string:signed = raw generate_hmac_sha512(raw_key, dec_len, concat_data, cast_unchecked<int64>(written));
+        
+        pass signed;
+    };
+// Build POST wrapper for /0/private/GetWebSocketsToken to fetch the transient wsToken
+pub func:kraken_get_ws_token = string(KrakenClient:client) {
+    // Stub: create POST payload
+    string:path = "/0/private/GetWebSocketsToken";
+    string:data = "nonce=1620000000000";
+    
+    // Call signature
+    string:signed_token = raw kraken_sign_request(cast_unchecked<any>(client), path, data);
+    
+    // Stub: parse JSON response for 'token'
+    string:token = "stub_ws_token";
+    pass token;
+};
+
+// Map Kraken JSON error arrays into standard Nitpick mapped tbb32 codes.
+pub func:kraken_map_error = tbb32(string:err_json) {
+    // Scaffold: Map 'EAPI:Invalid key' to 1 (Error) and empty array to 0 (OK).
+    // Stub string parsing:
+    pass 0i32;
+};
+
+use "orderbook.npk".*;
+
+pub func:kraken_parse_fast_tick = NIL(KrakenClient:client, wild int8->:buffer, int32:len, L2SyncState->:sync_state) {
+    // 0 allocations guaranteed.
+    // O(N) fast-path zero-copy scanner for book ticker
+    // Stub scan loop:
+    int32:i = 0i32;
+    while (i < len) {
+        // scan logic looking for price/vol
+        i = i + 1i32;
+    }
+    
+    int64:normalized_ts = raw normalize_timestamp_ms(1620000000i64); // dummy ms
+    
+    // Stub sequence number parsing
+    int64:seq_num = 1000i64;
+    drop raw sync_l2_delta(sync_state, seq_num);
+    
+    // Wire zero-copy output directly to the LockFreeQueue
+    // Pack a mock CompactHandle and emit
+    LockFreeQueue:local_q = client.events;
+    drop raw queue_push(@local_q, normalized_ts);
+    
+    pass NIL;
+};
+
+pub func:kraken_connect_private_ws = NIL(KrakenClient:client, string:ws_token) {
+    // Connect to wss://ws-auth.kraken.com injecting the wsToken
+    string:url = "wss://ws-auth.kraken.com";
+    string:sub_payload = "{\"event\":\"subscribe\",\"subscription\":{\"name\":\"ownTrades\",\"token\":\"stub\"}}";
+    // Send subscription
+    pass NIL;
+};
+
+pub func:kraken_connect_public_ws = NIL(KrakenClient:client) {
+    // Connect WebSocket state machine to wss://ws.kraken.com
+    string:url = "wss://ws.kraken.com";
+    string:sub_payload = "{\"event\":\"subscribe\",\"pair\":[\"XBT/USD\"],\"subscription\":{\"name\":\"book\",\"depth\":1000}}";
+    pass NIL;
+};
+
+

@@ -1,0 +1,11 @@
+pub struct:Order = {
+    int32:is_buy;
+    fix256:qty;
+};
+
+pub trait:ExchangeClient = {
+    func:auth = NIL(any:client);
+    func:sign_request = string(any:client, string:path, string:data);
+    func:submit_order = NIL(any:client, Order:order);
+    func:cancel_order = NIL(any:client);
+};

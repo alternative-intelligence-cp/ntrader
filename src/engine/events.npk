@@ -1,8 +1,0 @@
-use "../models/types.npk";
-
-pub enum:Event {
-    MarketEvent { Tick:tick },
-    SignalEvent { string:symbol, string:bias, fix256:confidence },
-    OrderEvent { Order:order },
-    FillEvent { string:order_id, fix256:fill_price, fix256:fill_qty }
-};

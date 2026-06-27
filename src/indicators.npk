@@ -1,0 +1,93 @@
+use "ringbuffer.npk".*;
+use "unsafe.npk".*;
+
+pub struct:EMA = {
+    int32:period;
+    tfp64:multiplier;
+    RingBuffer:history;
+    int32:ticks_processed;
+    #[align(64)]
+    simd<tfp64, 8>:vec;
+};
+
+pub func:ema_init = EMA(int32:period) {
+    EMA:ema;
+    ema.period = period;
+    
+    tfp64:p = cast_unchecked<tfp64>(period + 1i32);
+    ema.multiplier = 2.0tf64 / p;
+    
+    ema.history = raw ringbuffer_init();
+    ema.ticks_processed = 0i32;
+    
+    pass ema;
+};
+
+#[align(64)]
+struct:SimdInit = {
+    tfp64:a; tfp64:b; tfp64:c; tfp64:d;
+    tfp64:e; tfp64:f; tfp64:g; tfp64:h;
+};
+
+pub func:ema_push = tfp64(EMA->:ema, tfp64:price) {
+    int64:ema_addr = cast_unchecked<int64>(ema);
+    int64:h_addr = ema_addr + @offsetof(EMA, history); // STUB: Compiler lacks @offsetof support
+    RingBuffer->:hist_ptr = cast_unchecked<RingBuffer->>(h_addr);
+
+    if (price == ERR) {
+        ema->ticks_processed = 0i32;
+        raw ringbuffer_push(hist_ptr, price);
+        
+        pass ERR;
+    }
+    
+    raw ringbuffer_push(hist_ptr, price);
+    ema->ticks_processed = ema->ticks_processed + 1i32;
+    
+    if (ema->ticks_processed < ema->period) {
+        pass 0.0tf64; // Warm-up phase
+    }
+    
+    if (ema->ticks_processed == ema->period) {
+        tfp64:sma = raw ringbuffer_average(hist_ptr);
+        
+        SimdInit:s_init;
+        s_init.a = sma; s_init.b = sma; s_init.c = sma; s_init.d = sma;
+        s_init.e = sma; s_init.f = sma; s_init.g = sma; s_init.h = sma;
+        
+        simd<tfp64, 8>->:s_ptr = cast_unchecked<simd<tfp64, 8>->>(@s_init);
+        ema->vec = <-s_ptr;
+        
+        pass sma;
+    }
+    
+    SimdInit:p_init;
+    p_init.a = price; p_init.b = price; p_init.c = price; p_init.d = price;
+    p_init.e = price; p_init.f = price; p_init.g = price; p_init.h = price;
+    simd<tfp64, 8>->:p_ptr = cast_unchecked<simd<tfp64, 8>->>(@p_init);
+    simd<tfp64, 8>:price_vec = <-p_ptr;
+    
+    tfp64:m = ema->multiplier;
+    tfp64:om = 1.0tf64 - ema->multiplier;
+    
+    SimdInit:m_init;
+    m_init.a = m; m_init.b = m; m_init.c = m; m_init.d = m;
+    m_init.e = m; m_init.f = m; m_init.g = m; m_init.h = m;
+    simd<tfp64, 8>->:m_ptr = cast_unchecked<simd<tfp64, 8>->>(@m_init);
+    simd<tfp64, 8>:mult_vec = <-m_ptr;
+    
+    SimdInit:om_init;
+    om_init.a = om; om_init.b = om; om_init.c = om; om_init.d = om;
+    om_init.e = om; om_init.f = om; om_init.g = om; om_init.h = om;
+    simd<tfp64, 8>->:om_ptr = cast_unchecked<simd<tfp64, 8>->>(@om_init);
+    simd<tfp64, 8>:one_minus_mult = <-om_ptr;
+    
+    ema->vec = (price_vec * mult_vec) + (ema->vec * one_minus_mult);
+    
+    simd<tfp64, 8>:vec_temp = ema->vec;
+    int64:vec_addr = cast_unchecked<int64>(@vec_temp);
+    tfp64->:vec_ptr = cast_unchecked<tfp64->>(vec_addr);
+    tfp64:result = <-vec_ptr;
+    
+    pass result;
+};

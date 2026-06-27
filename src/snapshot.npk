@@ -1,0 +1,41 @@
+use "arena.npk".*;
+use "unsafe.npk".*;
+use "events.npk".*; // For atomic types
+
+
+extern "libnitpick_runtime" {
+    func:npk_atomic_thread_fence = NIL();
+}
+pub struct:ReadOnlySnapshot = {
+    TCBArena->:arena;
+};
+
+pub struct:ReadOnlyBuffer = {
+    atomic<int64>->:snapshot_ptr; // Store pointer to TCBArena as int64
+};
+
+pub func:snapshot_init = ReadOnlyBuffer() {
+    ReadOnlyBuffer:buf;
+    // atomic_new initializes the atomic value
+    buf.snapshot_ptr = atomic_new(0i64);
+    pass buf;
+};
+
+pub func:snapshot_publish = NIL(ReadOnlyBuffer->:buf, TCBArena->:arena) {
+    // Cast arena pointer to int64 and store it
+    int64:ptr_val = cast_unchecked<int64>(arena);
+    // STUB: atomic_store
+    // raw atomic_store(buf->snapshot_ptr, ptr_val);
+    pass NIL;
+};
+
+pub func:snapshot_read = ReadOnlySnapshot(atomic<int64>->:snapshot_ptr) {
+    // seqcst atomic fence (using compiler's atomic_fence or a dummy wrapper)
+    drop npk_atomic_thread_fence(); // A seqcst load acts as an acquire/seqcst fence barrier implicitly
+    
+    int64:ptr_val = npk_atomic_int64_load(cast_unchecked<any->>(snapshot_ptr)); 
+    TCBArena->:arena = cast_unchecked<TCBArena->>(ptr_val);
+    
+    ReadOnlySnapshot:snap = ReadOnlySnapshot{arena: arena};
+    pass snap;
+};

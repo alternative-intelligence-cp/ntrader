@@ -1,0 +1,88 @@
+// ---------------------------------------------------------
+// WALLET AND DETERMINISTIC LEDGER
+// ---------------------------------------------------------
+
+pub struct:Wallet = {
+    fix256:balance;
+    fix256:reserved;
+    fix256:leverage;
+};
+
+// Removed get_err_ledger_mismatch due to compiler ICE on negative fix256 literals.
+// We will return tbb32 error codes (-99i32) on ledger mismatch instead.
+
+// Risk Constraint Rules attached to Wallet struct
+Rules<Wallet>:r_positive_balance = { $->balance >= 0.0fix256, $->reserved >= 0.0fix256 };
+Rules<Wallet>:r_max_leverage = { $->leverage >= 1.0fix256, $->leverage <= 10.0fix256 };
+
+// Simulated ROUND_HALF_EVEN rounding for fix256
+pub func:fix256_round = fix256(fix256:amount) {
+    int64:addr = cast_unchecked<int64>(@amount);
+    int64->:frac_low_ptr = cast_unchecked<int64->>(addr);
+    int64->:frac_high_ptr = cast_unchecked<int64->>(addr + 8i64);
+    int64->:int_part_ptr = cast_unchecked<int64->>(addr + 16i64);
+    int64->:upper_ptr = cast_unchecked<int64->>(addr + 24i64);
+    
+    int64:frac_low = <-frac_low_ptr;
+    int64:frac_high = <-frac_high_ptr;
+    int64:int_part = <-int_part_ptr;
+    int64:upper = <-upper_ptr;
+    
+    int64:half_high = -9223372036854775808i64; // 1 << 63
+    
+    int32:round_up = 0i32;
+    if (frac_high < 0i64) {
+        if (frac_high != half_high) {
+            round_up = 1i32;
+        } else {
+            if (frac_low != 0i64) {
+                round_up = 1i32;
+            } else {
+                int64:is_odd = int_part % 2i64;
+                if (is_odd != 0i64) {
+                    round_up = 1i32;
+                }
+            }
+        }
+    }
+    
+    if (round_up == 1i32) {
+        if (upper < 0i64) {
+            <-int_part_ptr = int_part - 1i64;
+        } else {
+            <-int_part_ptr = int_part + 1i64;
+        }
+    }
+    
+    <-frac_low_ptr = 0i64;
+    <-frac_high_ptr = 0i64;
+    
+    pass amount;
+};
+
+// Extracts the whole-number integer portion from a fix256 struct (lower 64-bits of the integer part)
+pub func:fix256_to_int64 = int64(fix256->:val_ptr) {
+    int64:addr = cast_unchecked<int64>(val_ptr);
+    int64->:int_part_ptr = cast_unchecked<int64->>(addr + 16i64);
+    int64:lower = <-int_part_ptr;
+    
+    pass lower;
+};
+
+pub func:wallet_update = tbb32(Wallet->:wallet, fix256->:delta_balance, fix256->:delta_reserved) {
+    // Inline ROUND_HALF_EVEN rounding to avoid compiler ICE on fix256 function returns
+    fix256:new_balance = wallet->balance + <-delta_balance;
+    fix256:new_reserved = wallet->reserved + <-delta_reserved;
+    
+    if (new_balance < 0.0fix256) {
+        pass cast_unchecked<tbb32>(-99i32);
+    }
+    
+    if (new_reserved < 0.0fix256) {
+        pass cast_unchecked<tbb32>(-99i32);
+    }
+    
+    wallet->balance = new_balance;
+    wallet->reserved = new_reserved;
+    pass cast_unchecked<tbb32>(0i32);
+};

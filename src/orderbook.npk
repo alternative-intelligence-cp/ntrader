@@ -1,0 +1,125 @@
+use "arena.npk".*;
+
+pub struct:OrderBookLevel = {
+    int64:price;
+    TCBHandle:first_order;
+    TCBHandle:last_order;
+};
+
+pub struct:L2OrderBook = {
+    TCBHandle:bids;
+    TCBHandle:asks;
+    int32:depth;
+};
+
+pub func:orderbook_init = L2OrderBook() {
+    L2OrderBook:ob;
+    ob.depth = 100i32;
+    pass ob;
+};
+
+pub struct:L2SyncState = {
+    int64:last_sequence_number;
+    int32:expected_arena_gen;
+};
+
+// Validates the expected generational counter against the actual arena to detect stale references.
+pub func:verify_gen = bool(TCBArena:arena, L2SyncState:state) {
+    if (arena.generation != state.expected_arena_gen) {
+        pass false;
+    }
+    pass true;
+};
+
+// Data Integrity Failsafe for Delta-Snapshot Synchronization
+pub func:sync_l2_delta = Result<NIL>(L2SyncState->:state, int64:seq_num) {
+    if (state->last_sequence_number > 0i64) {
+        if (seq_num != state->last_sequence_number + 1i64) {
+            // ERR_DATA_CORRUPTION: Force deterministic failsafe shutdown
+            fail cast_unchecked<tbb32>(999i32);
+        }
+    }
+    state->last_sequence_number = seq_num;
+    pass NIL;
+};
+
+pub func:update_orderbook_level = Result<NIL>(L2OrderBook->:book, L2SyncState:state, TCBArena:arena, TCBHandle:handle) {
+    // Inject generation validation check to prevent applying network payload to stale orderbooks
+    if (raw verify_gen(arena, state) == false) {
+        // ERR_STALE_GEN: explicitly drop stale network packets
+        fail cast_unchecked<tbb32>(998i32);
+    }
+    
+    // Proceed with applying update...
+    pass NIL;
+};
+
+pub struct:CrossOpportunity = {
+    int64:bid_price;
+    int64:ask_price;
+    int64:spread;
+    int64:qty;
+};
+
+// Pure mathematical function for arbitrage logic (detached from state mutation)
+pub func:cross_check_l2 = CrossOpportunity(int64:highest_bid, int64:lowest_ask, int64:bid_qty, int64:ask_qty) {
+    if (highest_bid <= 0i64) { fail cast_unchecked<tbb32>(3i32); }
+    if (lowest_ask <= 0i64) { fail cast_unchecked<tbb32>(4i32); }
+    if (bid_qty <= 0i64) { fail cast_unchecked<tbb32>(5i32); }
+    if (ask_qty <= 0i64) { fail cast_unchecked<tbb32>(6i32); }
+    
+    if (highest_bid > lowest_ask) {
+        CrossOpportunity:opp;
+        opp.bid_price = highest_bid;
+        opp.ask_price = lowest_ask;
+        opp.spread = highest_bid - lowest_ask;
+        
+        if (bid_qty < ask_qty) {
+            opp.qty = bid_qty;
+        } else {
+            opp.qty = ask_qty;
+        }
+        
+        // Assert safety boundary
+        if (opp.spread <= 0i64) {
+            fail cast_unchecked<tbb32>(2i32);
+        }
+        
+        pass opp;
+    }
+    
+    // No cross opportunity
+    fail cast_unchecked<tbb32>(1i32);
+};
+
+// Liquidity Modeling (Slippage)
+// Calculates the average fill price by traversing the order book levels.
+pub func:calc_market_fill = tfp64(L2OrderBook->:book, tfp64:qty, bool:is_buy) {
+    if (qty == 0.0tf) { pass 0.0tf; }
+    
+    tfp64:filled_qty = 0.0tf;
+    tfp64:total_cost = 0.0tf;
+    
+    // Traversal logic skeleton
+    while (filled_qty < qty) {
+        // TODO: Get level from book using arena handles
+        // Level:level = book->get_best_level(is_buy);
+        tfp64:level_volume = 10.0tf; // dummy
+        tfp64:level_price = 100.0tf; // dummy
+        
+        tfp64:take = qty - filled_qty;
+        if (level_volume < take) {
+            take = level_volume;
+        }
+        
+        total_cost = total_cost + (take * level_price);
+        filled_qty = filled_qty + take;
+        
+        if (take == 0.0tf) {
+            // ERR_LIQUIDITY_EXHAUSTED
+            fail cast_unchecked<tbb32>(200i32);
+        }
+    }
+    
+    pass (total_cost / qty);
+};

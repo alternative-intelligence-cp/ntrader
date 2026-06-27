@@ -1,0 +1,344 @@
+use "events.npk".*;
+use "unsafe.npk".*;
+
+pub struct:Sentiment = {
+    tfp64:value;
+    tfp64:confidence;
+};
+
+pub struct:ResultSentiment = {
+    bool:is_error;
+    Sentiment:value;
+};
+
+pub struct:NitLLMState = {
+    atomic<int64>->:sentiment_score;
+    int32:allocated_bytes;
+    wild int8->:tensor_arena;
+};
+
+Rules<NitLLMState>:r_ai_memory_cap = { $->allocated_bytes <= 104857600i32 };
+
+extern "libnitpick_runtime" {
+    func:npk_core_alloc = int64(int64:size);
+    func:npk_core_dalloc = NIL(int64:ptr);
+    // stddbg stub
+    func:npk_stddbg = NIL(void*:msg);
+    func:npk_atomic_int64_store = NIL(void*:atomic_ptr, int64:val);
+
+}
+
+pub func:ai_init = NitLLMState() {
+    NitLLMState:state;
+    state.sentiment_score = atomic_new(0i64); // 0 = unknown
+    state.allocated_bytes = 0i32;
+    int64:init_ptr = npk_core_alloc(1048576i64);
+    any->:init_any = cast_unchecked<any->>(init_ptr);
+    state.tensor_arena = cast_unchecked<int8->>(init_any); // 1MB initial stub
+    pass state;
+};
+
+pub func:nitllm_infer = ResultSentiment(int64:market_data_stub) {
+    // STUB
+    ResultSentiment:res;
+    res.is_error = false;
+    res.value.value = 1.0tf;
+    res.value.confidence = 0.9tf;
+    pass res;
+};
+
+pub func:fallback_to_rsi_macd = tfp64() {
+    // STUB
+    pass 0.0tf;
+};
+
+pub func:get_sentiment_signal = tfp64(int64:market_data_stub) {
+    ResultSentiment:s = raw nitllm_infer(market_data_stub);
+    
+    // Circuit Breaker logic
+    if (s.is_error || s.value.confidence < 0.75tf) {
+        // Log to stddbg
+        // drop npk_stddbg(cast_unchecked<any->>(0i64)); // STUB string pointer
+        // Fallback to technical indicators
+        pass fallback_to_rsi_macd();
+    }
+    
+    pass s.value.value;
+};
+
+pub func:ai_worker_loop = NIL(NitLLMState->:state) {
+    // STUB: runs on a dedicated thread, receives events, and updates sentiment
+    pass NIL;
+};
+
+// Soft-fail allocation for nitllm
+pub func:ai_alloc = any->(NitLLMState->:state, int32:size) {
+    int32:new_size = state->allocated_bytes + size;
+    if (new_size > 104857600i32) {
+        fail cast_unchecked<tbb32>(1i32); // ERR_OOM
+    }
+    
+    state->allocated_bytes = new_size;
+    int64:raw_int = npk_core_alloc(cast_unchecked<int64>(size));
+    any->:ptr = cast_unchecked<any->>(raw_int);
+    pass ptr;
+};
+
+pub func:ai_free = NIL(any->:ptr, int32:size, NitLLMState->:state) {
+    int64:raw_int = cast_unchecked<int64>(ptr);
+    if (raw_int != 0i64) {
+        drop npk_core_dalloc(raw_int);
+        state->allocated_bytes = state->allocated_bytes - size;
+    }
+    pass NIL;
+};
+
+pub func:ai_cleanup = NIL(NitLLMState->:state) {
+    int64:init_ptr = cast_unchecked<int64>(state->tensor_arena);
+    if (init_ptr != 0i64) {
+        drop npk_core_dalloc(init_ptr);
+        state->tensor_arena = cast_unchecked<int8->>(0i64);
+    }
+    pass NIL;
+};
+
+// Alpha Signal Function with Z3 Monotonicity Validation
+pub func:alpha_signal = tfp64(tfp64:sentiment, tfp64:r_max_leverage) 
+    requires r_max_leverage >= 0.0tf
+    ensures result <= r_max_leverage
+{
+    tfp64:leverage = sentiment * 2.0tf;
+    
+    if (leverage > r_max_leverage) {
+        pass r_max_leverage;
+    }
+    
+    if (leverage < 0.0tf) {
+        pass 0.0tf;
+    }
+    
+    pass leverage;
+};
+
+// ---------------------------------------------------------
+// QUANTITATIVE ENGINE (0.4.X)
+// ---------------------------------------------------------
+
+// Using RingBuffer from ringbuffer.npk
+
+// ---------------------------------------------------------
+// STATE MANAGEMENT & SENTINELS
+// ---------------------------------------------------------
+
+pub func:get_tfp64_err = tfp64() {
+    pass cast_unchecked<tfp64>(0x8000000000000000i64);
+};
+
+pub func:sanitize_price = tfp64(tfp64:price) {
+    // 0x7FF0000000000000 is +Inf, 0xFFF0000000000000 is -Inf in double
+    // But tfp64 is an opaque type. We simulate checking for extreme bounds.
+    int64:raw_val = cast_unchecked<int64>(price);
+    
+    // If it hits the sentinel max/min bounds or our explicit ERR
+    if (raw_val == 0x8000000000000000i64) {
+        pass get_tfp64_err();
+    }
+    
+    // Accept valid price
+    pass price;
+};
+
+// ---------------------------------------------------------
+// TREND INDICATORS (EMA)
+// ---------------------------------------------------------
+
+pub struct:Ema = {
+    #[align(64)]
+    simd<tfp64, 8>:value;
+    int64:ticks;
+    int64:period;
+};
+
+// Check if any value in the SIMD vector is ERR
+pub func:simd_has_err = bool(simd<tfp64, 8>:vec) {
+    // STUB: compiler intrinsic or loop to check each lane
+    // Since we don't have lane extraction in Nitpick stdlib documented, we stub it as false unless needed.
+    pass false; 
+};
+
+pub func:get_simd_zero = simd<tfp64, 8>() {
+    // STUB: generate simd zeroes
+    simd<tfp64, 8>:zeros; // Default initialization
+    pass zeros;
+};
+
+pub func:update_ema_simd = simd<tfp64, 8>(Ema->:ema, simd<tfp64, 8>:prices) {
+    // 1. Sanitization Gate: Check for ERR poisoning
+    if (raw simd_has_err(prices)) {
+        ema->value = raw get_simd_zero();
+        ema->ticks = 0i64;
+        fail cast_unchecked<tbb32>(1i32); // ERR Corrupted State
+    }
+    
+    // 2. Warm-up Logic
+    if (ema->ticks < ema->period) {
+        ema->value = prices;
+        ema->ticks = ema->ticks + 1i64;
+        // Insufficient Data
+        fail cast_unchecked<tbb32>(2i32); 
+    }
+    
+    // 3. Recursive update
+    // Smoothing factor K = 2 / (N + 1)
+    // Formula: EMA = (Price * K) + (PrevEMA * (1 - K))
+    // We use stub K for period 14
+    // STUB SIMD literal: simd<tfp64, 8>:k = 0.13333tf64;
+    // We will just use zeros for scaffolding since we don't have SIMD float literal init yet.
+    simd<tfp64, 8>:k = raw get_simd_zero();
+    simd<tfp64, 8>:one_minus_k = raw get_simd_zero();
+    
+    ema->value = (prices * k) + (ema->value * one_minus_k);
+    
+    pass ema->value;
+};
+
+// ---------------------------------------------------------
+// MOMENTUM OSCILLATORS (RSI)
+// ---------------------------------------------------------
+
+pub struct:Rsi = {
+    #[align(64)]
+    simd<tfp64, 8>:avg_gain;
+    #[align(64)]
+    simd<tfp64, 8>:avg_loss;
+    #[align(64)]
+    simd<tfp64, 8>:last_price;
+    int64:ticks;
+    int64:period;
+};
+
+pub func:update_rsi_simd = simd<tfp64, 8>(Rsi->:rsi, simd<tfp64, 8>:prices) {
+    if (raw simd_has_err(prices)) {
+        rsi->avg_gain = raw get_simd_zero();
+        rsi->avg_loss = raw get_simd_zero();
+        rsi->last_price = raw get_simd_zero();
+        rsi->ticks = 0i64;
+        fail cast_unchecked<tbb32>(1i32); // ERR Corrupted State
+    }
+    
+    // First tick
+    if (rsi->ticks == 0i64) {
+        rsi->last_price = prices;
+        rsi->ticks = 1i64;
+        fail cast_unchecked<tbb32>(2i32);
+    }
+    
+    simd<tfp64, 8>:change = prices - rsi->last_price;
+    rsi->last_price = prices;
+    
+    // STUB: SIMD max/min or conditional selection.
+    // In actual SIMD, we would do: gain = max(change, 0), loss = max(-change, 0)
+    simd<tfp64, 8>:current_gain = raw get_simd_zero(); // STUB
+    simd<tfp64, 8>:current_loss = raw get_simd_zero(); // STUB
+    
+    if (rsi->ticks < rsi->period) {
+        rsi->avg_gain = rsi->avg_gain + current_gain;
+        rsi->avg_loss = rsi->avg_loss + current_loss;
+        rsi->ticks = rsi->ticks + 1i64;
+        
+        if (rsi->ticks == rsi->period) {
+            // Initial averages (Simple Average)
+            // rsi->avg_gain = rsi->avg_gain / period;
+            // STUB divide
+        }
+        fail cast_unchecked<tbb32>(2i32); // Insufficient Data
+    }
+    
+    // Wilder's Smoothing: (PrevAvg * (period - 1) + Current) / period
+    // STUB
+    rsi->ticks = rsi->ticks + 1i64;
+    
+    // Calculate RS and RSI
+    // RS = avg_gain / avg_loss
+    // if avg_loss == 0.0tf64 -> RSI = 100.0tf64
+    // else RSI = 100.0 - (100.0 / (1.0 + RS))
+    
+    // Return STUB result
+    pass raw get_simd_zero();
+};
+
+// ---------------------------------------------------------
+// ADVANCED INDICATORS
+// ---------------------------------------------------------
+
+pub struct:Macd = {
+    Ema:fast_ema;
+    Ema:slow_ema;
+    Ema:signal_ema;
+    #[align(64)]
+    simd<tfp64, 8>:histogram;
+    int64:ticks;
+};
+
+pub func:update_macd_simd = simd<tfp64, 8>(Macd->:macd, simd<tfp64, 8>:prices) {
+    if (raw simd_has_err(prices)) {
+        // Reset everything
+        macd->histogram = raw get_simd_zero();
+        macd->ticks = 0i64;
+        fail cast_unchecked<tbb32>(1i32);
+    }
+    
+    // Call EMAs
+    // STUB
+    
+    pass raw get_simd_zero();
+};
+
+pub struct:Vwap = {
+    #[align(64)]
+    simd<tfp64, 8>:cumulative_vp;
+    #[align(64)]
+    simd<tfp64, 8>:cumulative_v;
+    int64:ticks;
+};
+
+pub func:update_vwap_simd = simd<tfp64, 8>(Vwap->:vwap, simd<tfp64, 8>:prices, simd<tfp64, 8>:volumes) {
+    if (raw simd_has_err(prices) || raw simd_has_err(volumes)) {
+        vwap->cumulative_vp = raw get_simd_zero();
+        vwap->cumulative_v = raw get_simd_zero();
+        vwap->ticks = 0i64;
+        fail cast_unchecked<tbb32>(1i32);
+    }
+    
+    vwap->cumulative_vp = vwap->cumulative_vp + (prices * volumes);
+    vwap->cumulative_v = vwap->cumulative_v + volumes;
+    vwap->ticks = vwap->ticks + 1i64;
+    
+    // STUB division: pass vwap->cumulative_vp / vwap->cumulative_v;
+    pass raw get_simd_zero();
+};
+
+pub struct:BollingerBands = {
+    #[align(64)]
+    simd<tfp64, 8>:sma;
+    #[align(64)]
+    simd<tfp64, 8>:upper_band;
+    #[align(64)]
+    simd<tfp64, 8>:lower_band;
+    int64:period;
+    int64:ticks;
+};
+
+pub func:update_bb_simd = simd<tfp64, 8>(BollingerBands->:bb, simd<tfp64, 8>:prices) {
+    if (raw simd_has_err(prices)) {
+        bb->sma = raw get_simd_zero();
+        bb->upper_band = raw get_simd_zero();
+        bb->lower_band = raw get_simd_zero();
+        bb->ticks = 0i64;
+        fail cast_unchecked<tbb32>(1i32);
+    }
+    
+    // Calculate SMA and StdDev
+    // STUB stddev requires sqrt() which is missing from Nitpick stdlib currently
+    pass raw get_simd_zero();
+};

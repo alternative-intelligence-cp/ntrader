@@ -1,0 +1,171 @@
+
+extern "libnitpick_runtime" {
+    func:npk_atomic_int64_load = int64(void*:atomic_ptr);
+    func:npk_atomic_int64_store = void(void*:atomic_ptr, int64:val);
+    func:npk_atomic_int64_compare_exchange_strong = bool(void*:atomic_ptr, void*:expected_ptr, int64:desired);
+    func:npk_atomic_int32_load = int32(void*:atomic_ptr);
+    func:npk_atomic_int32_compare_exchange_strong = bool(void*:atomic_ptr, void*:expected_ptr, int32:desired);
+}
+extern "libc" {
+    func:npk_core_alloc = int64(int64:size);
+    func:puts = int32(string:s);
+}
+
+pub struct:Event = {
+    int32:type;
+    int64:payload;
+};
+
+pub struct:CompactHandle = {
+    int32:generation;
+    int32:index;
+};
+
+pub struct:ValNode = {
+    int64:sequence;
+    int64:value;
+};
+
+pub struct:LockFreeQueue = {
+    wild any->:mem;
+    atomic<int64>->:head;
+    atomic<int64>->:tail;
+    int32:capacity;
+    atomic<int32>->:count;
+};
+
+pub func:queue_init = LockFreeQueue(int32:cap) {
+    LockFreeQueue:q;
+    int64:sz = cast_unchecked<int64>(cap) * 16i64;
+    q.mem = cast_unchecked<any->>(npk_core_alloc(sz));
+    q.head = atomic_new(0i64);
+    q.tail = atomic_new(0i64);
+    q.capacity = cap;
+    q.count = atomic_new(0i32);
+    
+    // Initialize sequence counters
+    int32:i = 0i32;
+    while (i < cap) {
+        int64:offset = cast_unchecked<int64>(i) * 16i64;
+        int64:base = cast_unchecked<int64>(q.mem);
+        ValNode->:ptr = cast_unchecked<ValNode->>(base + offset);
+        ptr->sequence = cast_unchecked<int64>(i);
+        i = i + 1i32;
+    }
+    
+    pass q;
+};
+
+// Native atomics are used now.
+
+pub func:queue_push = int32(LockFreeQueue->:q, int64:val) {
+    int32:cap = q->capacity;
+    int64:cap_64 = cast_unchecked<int64>(cap);
+    bool:success = false;
+    
+    while (success == false) {
+        int64:pos = npk_atomic_int64_load(cast_unchecked<any->>(q->tail));
+        int64:index = pos % cap_64;
+        int64:offset = index * 16i64;
+        int64:base = cast_unchecked<int64>(q->mem);
+        ValNode->:ptr = cast_unchecked<ValNode->>(base + offset);
+        
+        int64:seq_offset = @offsetof(ValNode, sequence);
+        int64:seq_addr = cast_unchecked<int64>(ptr) + seq_offset;
+        int64:seq = npk_atomic_int64_load(cast_unchecked<any->>(seq_addr));
+        int64:dif = seq - pos;
+        
+        if (dif == 0i64) {
+            success = npk_atomic_int64_compare_exchange_strong(
+                cast_unchecked<any->>(q->tail),
+                cast_unchecked<any->>(@pos),
+                pos + 1i64
+            );
+            
+            if (success) {
+                ptr->value = val;
+                npk_atomic_int64_store(cast_unchecked<any->>(seq_addr), pos + 1i64);
+                
+                // Atomically increment count
+                bool:c_succ = false;
+                int32:c_val = npk_atomic_int32_load(cast_unchecked<any->>(q->count));
+                while (c_succ == false) {
+                    int32:next_c = c_val + 1i32;
+                    c_succ = npk_atomic_int32_compare_exchange_strong(
+                        cast_unchecked<any->>(q->count),
+                        cast_unchecked<any->>(@c_val),
+                        next_c
+                    );
+                }
+                pass 0i32;
+            }
+        } else {
+            if (dif < 0i64) {
+                pass 2i32; // Full
+            }
+        }
+    }
+    pass 0i32;
+};
+
+pub func:queue_pop = int64(LockFreeQueue->:q) {
+    int64:cap_64 = cast_unchecked<int64>(q->capacity);
+    bool:success = false;
+    int64:ret_val = 0i64;
+    
+    while (success == false) {
+        int64:pos = npk_atomic_int64_load(cast_unchecked<any->>(q->head));
+        int64:index = pos % cap_64;
+        int64:offset = index * 16i64;
+        int64:base = cast_unchecked<int64>(q->mem);
+        ValNode->:ptr = cast_unchecked<ValNode->>(base + offset);
+        
+        int64:seq_offset = @offsetof(ValNode, sequence);
+        int64:seq_addr = cast_unchecked<int64>(ptr) + seq_offset;
+        int64:seq = npk_atomic_int64_load(cast_unchecked<any->>(seq_addr));
+        int64:dif = seq - (pos + 1i64);
+        
+        if (dif == 0i64) {
+            success = npk_atomic_int64_compare_exchange_strong(
+                cast_unchecked<any->>(q->head),
+                cast_unchecked<any->>(@pos),
+                pos + 1i64
+            );
+            
+            if (success) {
+                ret_val = ptr->value;
+                npk_atomic_int64_store(cast_unchecked<any->>(seq_addr), pos + cap_64);
+                
+                // Atomically decrement count
+                bool:c_succ = false;
+                int32:c_val = npk_atomic_int32_load(cast_unchecked<any->>(q->count));
+                while (c_succ == false) {
+                    int32:next_c = c_val - 1i32;
+                    c_succ = npk_atomic_int32_compare_exchange_strong(
+                        cast_unchecked<any->>(q->count),
+                        cast_unchecked<any->>(@c_val),
+                        next_c
+                    );
+                }
+                pass ret_val;
+            }
+        } else {
+            if (dif < 0i64) {
+                pass 0i64; // Empty
+            }
+        }
+    }
+    pass ret_val;
+};
+
+// Deterministic timestamp normalization logic (ms to uniform ns)
+pub func:normalize_timestamp_ms = int64(int64:ms) {
+    pass ms * 1000000i64;
+};
+
+// Z3 Assertion: prove mathematically that zero dynamic allocations occur here
+// assert_static(@allocations == 0i64); // Pending compiler support for @allocations
+pub func:on_tick = NIL() {
+    // assert_static(@allocations == 0i64);
+    pass NIL;
+};

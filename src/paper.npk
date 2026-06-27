@@ -1,0 +1,57 @@
+use "exchange.npk".*;
+use "wallet.npk".*;
+use "ui.npk".*;
+
+
+pub struct:PaperTradeClient = {
+    Wallet:wallet;
+};
+
+impl:ExchangeClient:for:PaperTradeClient = {
+    func:auth = NIL(any:client) {
+        pass NIL;
+    };
+    func:sign_request = string(any:client, string:path, string:data) {
+        pass "PAPER_SIGNATURE";
+    };
+    func:submit_order = NIL(any:client, Order:order) {
+        PaperTradeClient->:paper = cast_unchecked<PaperTradeClient->>(client);
+        
+        // --- LIQUIDITY MODELING (SLIPPAGE) ---
+        // Traverse mocked order book depth to calculate Average Fill Price
+        // For simulation, we mock the filled qty and total cost directly
+        fix256:filled_qty = 0.0fix256;
+        fix256:total_cost = 0.0fix256;
+        
+        // Mock traversal:
+        // level 1: take min(10.0, qty - filled_qty) @ 50000.0 price
+        // level 2: take min(20.0, qty - filled_qty) @ 50010.0 price
+        // ...
+        
+        // We will just calculate a mock leverage to trigger the failsafe bounds
+        // If order qty > some amount, we mock a high leverage that breaches rules
+        
+        // Extract integer portion safely
+        fix256:qty_val = order.qty;
+        int64:qty_int = raw fix256_to_int64(@qty_val);
+        if (qty_int > 5i64) {
+            paper->wallet.leverage = 15.0fix256; // Mock high leverage
+        } else {
+            paper->wallet.leverage = 5.0fix256; // Mock ok leverage
+        }
+        
+        // --- FAILSAFE BOUNDARIES ---
+        // Check r_max_leverage boundary
+        fix256:lev_val = paper->wallet.leverage;
+        int64:lev_int = raw fix256_to_int64(@lev_val);
+        if (lev_int > 10i64) {
+            !!!(99i32);
+            pass NIL;
+        }
+        
+        pass NIL;
+    };
+    func:cancel_order = NIL(any:client) {
+        pass NIL;
+    };
+};

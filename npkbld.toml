@@ -1,6 +1,6 @@
 [project]
 name = "ntrader"
-version = "0.1.0"
+version = "0.3.2"
 description = "High-Frequency Cryptocurrency Trading Bot in Nitpick"
 entry = "src/main.npk"
 author = "Randy"
