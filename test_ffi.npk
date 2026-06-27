@@ -1,0 +1,15 @@
+extern "crypto" {
+    func:EVP_sha512 = any();
+    func:puts = int32(string:str);
+}
+pub func:failsafe = int32(tbb32:err) {
+    drop err;
+    exit 1i32;
+};
+pub func:main = int32() {
+    any:md = EVP_sha512();
+    int32:x = puts("OpenSSL EVP_sha512 linked!");
+    drop md;
+    drop x;
+    exit 0i32;
+};

@@ -1,0 +1,44 @@
+use "events.npk";
+use "../models/types.npk";
+use "../models/indicators.npk";
+
+pub struct:Engine {
+    LockFreeQueue<Event>@:event_bus;
+    TCBArena:state_arena;
+};
+
+pub func:engine_init = Engine() {
+    Engine:engine = {
+        event_bus: alloc(LockFreeQueue<Event>), // Using alloc for wild memory explicitly
+        state_arena: TCBArena_new()
+    };
+    // Initialize the lock-free queue
+    queue_init(engine.event_bus);
+    pass(engine);
+}
+
+pub func:engine_run = NIL(Engine@:engine) {
+    loop {
+        Event?:evt = queue_pop(engine->event_bus) ?? NIL;
+        if (evt != NIL) {
+            pick (evt) {
+                (Event.MarketEvent { tick }) {
+                    // Update indicators and generate signals
+                    // print("Market event received for "); println(tick.symbol);
+                },
+                (Event.SignalEvent { symbol, bias, confidence }) {
+                    // Portfolio module handles signals
+                },
+                (Event.OrderEvent { order }) {
+                    // Send to execution handler
+                },
+                (Event.FillEvent { order_id, fill_price, fill_qty }) {
+                    // Update ledger and positions via TCBArena handles
+                },
+                (*) {
+                    // Drop unknown events
+                }
+            }
+        }
+    }
+}

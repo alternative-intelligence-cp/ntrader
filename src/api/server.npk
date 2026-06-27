@@ -1,0 +1,20 @@
+// nitpick-http integration for local API (Frontend Bridge)
+
+pub struct:APIServer {
+    int32:port;
+};
+
+pub func:api_init = APIServer(int32:port) {
+    APIServer:server = { port: port };
+    pass(server);
+}
+
+pub func:api_start = NIL(APIServer@:server) {
+    // Scaffold nitpick-http routing
+    // router_post("/api/v1/orders", handle_create_order);
+    // router_get("/api/v1/portfolio", handle_get_portfolio);
+    
+    // server_listen("127.0.0.1", server->port);
+    // print("API Server listening on port "); println(server->port);
+    pass(NIL);
+}

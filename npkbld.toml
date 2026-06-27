@@ -1,0 +1,12 @@
+[project]
+name = "ntrader"
+version = "0.1.0"
+description = "High-Frequency Cryptocurrency Trading Bot in Nitpick"
+entry = "src/main.npk"
+author = "Randy"
+
+[dependencies]
+libn = { path = "../libn" }
+nitpick-http = { path = "../nitpick-packages/packages/nitpick-http" }
+nitpick-websocket = { path = "../nitpick-packages/packages/nitpick-websocket" }
+nitpick-crypto = { path = "../nitpick-packages/packages/nitpick-crypto" }

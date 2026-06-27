@@ -1,0 +1,45 @@
+use "types.npk";
+
+// EMA implementation using tfp64 for sticky ERR sentinels
+pub struct:EMA {
+    array<tfp64, 14>:history;
+    int32:head;
+    int32:count;
+    tfp64:multiplier;
+};
+
+pub func:ema_init = EMA(int32:periods)
+    requires periods > 0i32
+{
+    tfp64:n = cast<tfp64>(periods);
+    tfp64:mult = 2.0tfp64 / (n + 1.0tfp64);
+    EMA:ema = { history: [], head: 0i32, count: 0i32, multiplier: mult };
+    pass(ema);
+}
+
+pub func:ema_update = tfp64(EMA@:ema, tfp64:price) {
+    if (ema->count == 0i32) {
+        ema->history[0i32] = price;
+        ema->count = 1i32;
+        ema->head = 0i32;
+        pass(price);
+    }
+    
+    tfp64:prev = ema->history[ema->head];
+    tfp64:current = (price - prev) * ema->multiplier + prev;
+    
+    // Check for fractional ERR sentinel explicitly
+    if (current == ERR) {
+        pass(ERR);
+    }
+    
+    int32:next_head = (ema->head + 1i32) % 14i32;
+    ema->history[next_head] = current;
+    ema->head = next_head;
+    
+    if (ema->count < 14i32) {
+        ema->count = ema->count + 1i32;
+    }
+    
+    pass(current);
+}

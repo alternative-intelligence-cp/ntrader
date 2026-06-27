@@ -1,0 +1,44 @@
+use "engine/event_loop.npk";
+use "exchange/kraken.npk";
+use "api/server.npk";
+
+// The mandatory global failsafe handler
+pub func:failsafe = int32(tbb32:err) {
+    // 1. Immediately drop all active tasks and cancel limit orders
+    // ...
+    
+    // 2. Cast error to exit code using cast_unchecked
+    drop err;
+    int32:code = cast_unchecked<int32>(err);
+    
+    // System faults are negative, user faults are positive. 
+    // Ensure we exit with a non-zero code.
+    if (code == 0i32) { 
+        code = 1i32; 
+    }
+    
+    // sys::print_err("CRITICAL ABORT: Engine failsafe triggered");
+    exit(code);
+}
+
+pub func:main = int32() {
+    // Initialize Kraken client
+    KrakenClient:client = kraken_new("api_key", "api_secret");
+    
+    // Initialize trading engine
+    Engine:engine = engine_init();
+    
+    // Initialize HTTP API for frontend
+    APIServer:api = api_init(8080i32);
+    
+    // Spawn API as async coroutine
+    // async api_start(&api);
+    
+    // Connect to exchange websockets
+    // client.connect_ws();
+    
+    // Enter core event loop
+    // engine_run(&engine);
+    
+    pass(0i32);
+}

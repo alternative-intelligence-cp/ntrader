@@ -1,0 +1,12 @@
+pub func:failsafe = int32(tbb32:err) {
+    drop err;
+    exit 1i32;
+};
+
+pub func:main = int32() {
+    atomic<int32>:counter = atomic_new(0i32);
+    int32:old_val = counter.load();
+    counter.store(5i32);
+    drop old_val;
+    exit 0i32;
+};
