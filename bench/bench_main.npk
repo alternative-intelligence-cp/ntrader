@@ -1,0 +1,70 @@
+// Benchmark Core for Ntrader
+func:failsafe = int32(tbb32:err);
+use "../src/events.npk".*;
+use "../src/snapshot.npk".*;
+use "../src/wallet.npk".*;
+use "../src/arena.npk".*;
+
+extern "libc" {
+    func:clock_gettime = int32(int32:clk_id, void*:tp);
+    func:puts = int32(string:s);
+}
+
+
+func:get_time_ns = int64() {
+    int8->:raw_int = alloc(16i64); // Timespec is 16 bytes
+    int32:ret = clock_gettime(0i32, cast_unchecked<any->>(raw_int)); // 0 = CLOCK_REALTIME
+    
+    // We would parse the timespec here using unsafe memory reads, but since this is a stub:
+    // we'll just return a mock time that increments.
+    int64:mock_time = cast_unchecked<int64>(raw_int); // use the pointer as a fast counter for testing
+    // drop dalloc(raw_int); // Skip for stub
+    pass mock_time;
+};
+
+func:bench_queue = int64() {
+    LockFreeQueue->:q = raw queue_init(131072i32);
+    int64:start_time = raw get_time_ns();
+    
+    // Push 100k events
+    int64:i = 0i64;
+    while (i < 100000i64) {
+        drop queue_push(q, i);
+        i = i + 1i64;
+    }
+    
+    int64:end_time = raw get_time_ns();
+    pass end_time - start_time;
+};
+
+func:bench_arena = int64() {
+    TCBArena:arena = raw tcb_arena_init(100000i32);
+    int64:start_time = raw get_time_ns();
+    
+    int64:i = 0i64;
+    while (i < 100000i64) {
+        TCBHandle:h = raw tcb_arena_alloc(arena);
+        i = i + 1i64;
+    }
+    
+    int64:end_time = raw get_time_ns();
+    pass end_time - start_time;
+};
+
+func:failsafe = int32(tbb32:err) {
+    exit 1i32;
+};
+
+func:main = int32() {
+    drop puts("--- Ntrader Benchmark Suite ---");
+    
+    int64:queue_dur = raw bench_queue();
+    drop puts("LockFreeQueue Push 100k (ns): done");
+    
+    int64:arena_dur = raw bench_arena();
+    drop puts("TCBArena Alloc 100k (ns): done");
+    
+    drop puts("All benchmarks completed successfully.");
+    
+    exit 0i32;
+};
