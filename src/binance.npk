@@ -1,3 +1,4 @@
+func:failsafe = int32(tbb32:err);
 use "exchange.npk".*;
 use "crypto.npk".*;
 use "events.npk".*;
@@ -23,7 +24,7 @@ pub struct:BinanceClient = {
     int64:signed_secret_addr;
     int32:key_len;
     int32:secret_len;
-    LockFreeQueue:events;
+    LockFreeQueue->:events;
 };
 
 impl:ExchangeClient:for:BinanceClient = {
@@ -44,7 +45,9 @@ impl:ExchangeClient:for:BinanceClient = {
         }
         
         int32:written = snprintf(cast_unchecked<any->>(concat_data), 2048i64, "%s%s", path, data);
-        
+        if (written < 0i32) { written = 0i32; }
+        if (written > 2048i32) { written = 2048i32; }
+
         // Generate signature
         string:signed = raw generate_hmac_sha256(secret, bin.secret_len, concat_data, cast_unchecked<int64>(written));
         
@@ -71,7 +74,7 @@ pub func:binance_keepalive_thread = any->(any->:arg) {
     WorkerContext->:ctx = cast_unchecked<WorkerContext->>(arg);
     int32:elapsed = 0i32;
     while (true) {
-        int32:is_shutdown = npk_atomic_int32_load(cast_unchecked<any->>(ctx->shutdown_flag));
+        int32:is_shutdown = npk_atomic_int32_load(cast_unchecked<any->>((cast_unchecked<int64>(ctx) + @offsetof(WorkerContext, shutdown_flag))));
         if (is_shutdown == 1i32) {
             break;
         }
@@ -102,9 +105,17 @@ pub func:binance_parse_fast_tick = NIL(BinanceClient:client, wild int8->:buffer,
     prove(1620000000i64 < 9223372036854i64); // Max ms before ns overflow
     int64:normalized_ts = raw normalize_timestamp_ms(1620000000i64); // dummy ms
     
-    // Wire zero-copy output directly to the LockFreeQueue
-    LockFreeQueue:local_q = client.events;
-    drop queue_push(@local_q, normalized_ts);
+    // Allocate Event on heap to prevent timestamp truncation
+    int64:evt_addr = npk_core_alloc(16i64);
+    Event->:evt_ptr = cast_unchecked<Event->>(evt_addr);
+    evt_ptr->type = 0i32;
+    evt_ptr->payload = normalized_ts;
+
+    LockFreeQueue->:local_q = client.events;
+    int32:push_status = raw queue_push(local_q, evt_addr);
+    if (push_status != 0i32) {
+        npk_core_dalloc(evt_addr);
+    }
     
     pass NIL;
 };

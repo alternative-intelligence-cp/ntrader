@@ -1,3 +1,4 @@
+func:failsafe = int32(tbb32:err);
 extern "libnitpick_runtime" {}
 extern "libcrypto" {
     func:EVP_sha256 = void*();
@@ -9,7 +10,7 @@ extern "libcrypto" {
 
 pub func:secure_wipe = NIL(int64:ptr, int64:len) {
     // Nitpick treats extern FFI calls as opaque barriers, preventing DSE.
-    drop OPENSSL_cleanse(cast_unchecked<any->>(ptr), len);
+    OPENSSL_cleanse(cast_unchecked<any->>(ptr), len);
     pass NIL;
 };
 

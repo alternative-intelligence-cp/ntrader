@@ -1,9 +1,10 @@
-
+func:failsafe = int32(tbb32:err);
 extern "libnitpick_runtime" {
     func:npk_atomic_int64_load = int64(void*:atomic_ptr);
     func:npk_atomic_int64_store = void(void*:atomic_ptr, int64:val);
     func:npk_atomic_int64_compare_exchange_strong = bool(void*:atomic_ptr, void*:expected_ptr, int64:desired);
     func:npk_atomic_int32_load = int32(void*:atomic_ptr);
+    func:npk_atomic_int32_store = void(void*:atomic_ptr, int32:val);
     func:npk_atomic_int32_compare_exchange_strong = bool(void*:atomic_ptr, void*:expected_ptr, int32:desired);
 }
 extern "libc" {
@@ -28,26 +29,26 @@ pub struct:ValNode = {
 
 pub struct:LockFreeQueue = {
     wild any->:mem;
-    atomic<int64>->:head;
-    atomic<int64>->:tail;
+    atomic<int64>:head;
+    atomic<int64>:tail;
     int32:capacity;
-    atomic<int32>->:count;
+    atomic<int32>:count;
 };
 
-pub func:queue_init = LockFreeQueue(int32:cap) {
-    LockFreeQueue:q;
+pub func:queue_init = LockFreeQueue->(int32:cap) {
+    LockFreeQueue->:q = cast_unchecked<LockFreeQueue->>(alloc(cast_unchecked<int64>(@sizeof(LockFreeQueue))));
     int64:sz = cast_unchecked<int64>(cap) * 16i64;
-    q.mem = cast_unchecked<any->>(npk_core_alloc(sz));
-    q.head = atomic_new(0i64);
-    q.tail = atomic_new(0i64);
-    q.capacity = cap;
-    q.count = atomic_new(0i32);
+    q->mem = cast_unchecked<any->>(npk_core_alloc(sz));
+    npk_atomic_int64_store(cast_unchecked<any->>((cast_unchecked<int64>(q) + @offsetof(LockFreeQueue, head))), 0i64);
+    npk_atomic_int64_store(cast_unchecked<any->>((cast_unchecked<int64>(q) + @offsetof(LockFreeQueue, tail))), 0i64);
+    q->capacity = cap;
+    npk_atomic_int32_store(cast_unchecked<any->>((cast_unchecked<int64>(q) + @offsetof(LockFreeQueue, count))), 0i32);
     
     // Initialize sequence counters
     int32:i = 0i32;
     while (i < cap) {
         int64:offset = cast_unchecked<int64>(i) * 16i64;
-        int64:base = cast_unchecked<int64>(q.mem);
+        int64:base = cast_unchecked<int64>(q->mem);
         ValNode->:ptr = cast_unchecked<ValNode->>(base + offset);
         ptr->sequence = cast_unchecked<int64>(i);
         i = i + 1i32;
@@ -64,7 +65,7 @@ pub func:queue_push = int32(LockFreeQueue->:q, int64:val) {
     bool:success = false;
     
     while (success == false) {
-        int64:pos = npk_atomic_int64_load(cast_unchecked<any->>(q->tail));
+        int64:pos = npk_atomic_int64_load(cast_unchecked<any->>((cast_unchecked<int64>(q) + @offsetof(LockFreeQueue, tail))));
         int64:index = pos % cap_64;
         int64:offset = index * 16i64;
         int64:base = cast_unchecked<int64>(q->mem);
@@ -77,7 +78,7 @@ pub func:queue_push = int32(LockFreeQueue->:q, int64:val) {
         
         if (dif == 0i64) {
             success = npk_atomic_int64_compare_exchange_strong(
-                cast_unchecked<any->>(q->tail),
+                cast_unchecked<any->>((cast_unchecked<int64>(q) + @offsetof(LockFreeQueue, tail))),
                 cast_unchecked<any->>(@pos),
                 pos + 1i64
             );
@@ -88,11 +89,11 @@ pub func:queue_push = int32(LockFreeQueue->:q, int64:val) {
                 
                 // Atomically increment count
                 bool:c_succ = false;
-                int32:c_val = npk_atomic_int32_load(cast_unchecked<any->>(q->count));
+                int32:c_val = npk_atomic_int32_load(cast_unchecked<any->>((cast_unchecked<int64>(q) + @offsetof(LockFreeQueue, count))));
                 while (c_succ == false) {
                     int32:next_c = c_val + 1i32;
                     c_succ = npk_atomic_int32_compare_exchange_strong(
-                        cast_unchecked<any->>(q->count),
+                        cast_unchecked<any->>((cast_unchecked<int64>(q) + @offsetof(LockFreeQueue, count))),
                         cast_unchecked<any->>(@c_val),
                         next_c
                     );
@@ -114,7 +115,7 @@ pub func:queue_pop = int64(LockFreeQueue->:q) {
     int64:ret_val = 0i64;
     
     while (success == false) {
-        int64:pos = npk_atomic_int64_load(cast_unchecked<any->>(q->head));
+        int64:pos = npk_atomic_int64_load(cast_unchecked<any->>((cast_unchecked<int64>(q) + @offsetof(LockFreeQueue, head))));
         int64:index = pos % cap_64;
         int64:offset = index * 16i64;
         int64:base = cast_unchecked<int64>(q->mem);
@@ -127,7 +128,7 @@ pub func:queue_pop = int64(LockFreeQueue->:q) {
         
         if (dif == 0i64) {
             success = npk_atomic_int64_compare_exchange_strong(
-                cast_unchecked<any->>(q->head),
+                cast_unchecked<any->>((cast_unchecked<int64>(q) + @offsetof(LockFreeQueue, head))),
                 cast_unchecked<any->>(@pos),
                 pos + 1i64
             );
@@ -138,11 +139,11 @@ pub func:queue_pop = int64(LockFreeQueue->:q) {
                 
                 // Atomically decrement count
                 bool:c_succ = false;
-                int32:c_val = npk_atomic_int32_load(cast_unchecked<any->>(q->count));
+                int32:c_val = npk_atomic_int32_load(cast_unchecked<any->>((cast_unchecked<int64>(q) + @offsetof(LockFreeQueue, count))));
                 while (c_succ == false) {
                     int32:next_c = c_val - 1i32;
                     c_succ = npk_atomic_int32_compare_exchange_strong(
-                        cast_unchecked<any->>(q->count),
+                        cast_unchecked<any->>((cast_unchecked<int64>(q) + @offsetof(LockFreeQueue, count))),
                         cast_unchecked<any->>(@c_val),
                         next_c
                     );

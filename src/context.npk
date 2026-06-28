@@ -1,11 +1,10 @@
 use "events.npk".*;
 
 pub struct:WorkerContext = {
-    atomic<int32>->:shutdown_flag;
-    atomic<int64>->:snapshot_ptr;
-    atomic<int64>->:sentiment_score;
-    atomic<int64>->:sentiment_confidence;
-    atomic<int64>->:active_config_addr;
-    LockFreeQueue:evt_queue;
+    atomic<int32>:shutdown_flag;
+    atomic<int64>:snapshot_ptr;
+    atomic<int64>:sentiment_score;
+    atomic<int64>:sentiment_confidence;
+    atomic<int64>:active_config_addr;
+    LockFreeQueue->:evt_queue;
 };
-

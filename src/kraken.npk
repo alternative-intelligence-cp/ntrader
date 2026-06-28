@@ -1,3 +1,4 @@
+func:failsafe = int32(tbb32:err);
 use "exchange.npk".*;
 use "crypto.npk".*;
 use "events.npk".*;
@@ -18,7 +19,7 @@ pub struct:KrakenClient = {
     int64:signed_token_addr;
     int32:key_len;
     int32:token_len;
-    LockFreeQueue:events;
+    LockFreeQueue->:events;
 };
 
 impl:ExchangeClient:for:KrakenClient = {
@@ -64,6 +65,8 @@ pub func:kraken_sign_request = string(any:client, string:path, string:data) {
         }
         
         int32:written = snprintf(cast_unchecked<any->>(concat_data), 2048i64, "%s%s", path, data);
+        if (written < 0i32) { written = 0i32; }
+        if (written > 2048i32) { written = 2048i32; }
         string:signed = raw generate_hmac_sha512(raw_key, dec_len, concat_data, cast_unchecked<int64>(written));
         
         pass signed;
@@ -105,12 +108,19 @@ pub func:kraken_parse_fast_tick = NIL(KrakenClient:client, wild int8->:buffer, i
     
     // Stub sequence number parsing
     int64:seq_num = 1000i64;
-    drop raw sync_l2_delta(sync_state, seq_num);
+    sync_l2_delta(sync_state, seq_num) ?! 99i32;
     
-    // Wire zero-copy output directly to the LockFreeQueue
-    // Pack a mock CompactHandle and emit
-    LockFreeQueue:local_q = client.events;
-    drop raw queue_push(@local_q, normalized_ts);
+    // Allocate Event on heap to prevent timestamp truncation
+    int64:evt_addr = npk_core_alloc(16i64);
+    Event->:evt_ptr = cast_unchecked<Event->>(evt_addr);
+    evt_ptr->type = 0i32;
+    evt_ptr->payload = normalized_ts;
+    
+    LockFreeQueue->:local_q = client.events;
+    int32:push_status = raw queue_push(local_q, evt_addr);
+    if (push_status != 0i32) {
+        npk_core_dalloc(evt_addr);
+    }
     
     pass NIL;
 };
@@ -129,5 +139,3 @@ pub func:kraken_connect_public_ws = NIL(KrakenClient:client) {
     string:sub_payload = "{\"event\":\"subscribe\",\"pair\":[\"XBT/USD\"],\"subscription\":{\"name\":\"book\",\"depth\":1000}}";
     pass NIL;
 };
-
-

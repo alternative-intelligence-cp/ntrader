@@ -1,3 +1,4 @@
+func:failsafe = int32(tbb32:err);
 pub struct:Order = {
     int32:is_buy;
     fix256:qty;

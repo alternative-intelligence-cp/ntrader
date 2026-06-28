@@ -1,3 +1,4 @@
+func:failsafe = int32(tbb32:err);
 use "exchange.npk".*;
 use "wallet.npk".*;
 use "ui.npk".*;
@@ -45,10 +46,9 @@ impl:ExchangeClient:for:PaperTradeClient = {
         fix256:lev_val = paper->wallet.leverage;
         int64:lev_int = raw fix256_to_int64(@lev_val);
         if (lev_int > 10i64) {
-            !!!(99i32);
-            pass NIL;
+            !!!(99tbb32);
         }
-        
+
         pass NIL;
     };
     func:cancel_order = NIL(any:client) {

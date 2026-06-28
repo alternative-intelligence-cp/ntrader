@@ -1,3 +1,4 @@
+func:failsafe = int32(tbb32:err);
 use "unsafe.npk".*;
 use "traits.npk".*;
 
@@ -9,5 +10,3 @@ pub struct:WallClock = {
 pub struct:EventClock = {
     int64:current_time;
 };
-
-

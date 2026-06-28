@@ -1,3 +1,4 @@
+func:failsafe = int32(tbb32:err);
 use "network.npk".*;
 use "crypto.npk".*;
 use "websocket.npk".*;
@@ -43,6 +44,8 @@ extern "libnitpick_runtime" {
     func:npk_atomic_int64_store = void(void*:atomic_ptr, int64:val);
     func:npk_atomic_int32_load = int32(void*:atomic_ptr);
     func:npk_atomic_int32_store = void(void*:atomic_ptr, int32:val);
+    func:npk_core_alloc = int64(int64:size);
+    func:npk_core_dalloc = void(int64:ptr);
 }
 
 int64:cancel_all_payload_addr = 0i64;
@@ -52,7 +55,7 @@ int64:orig_termios_addr = 0i64;
 pub func:restore_tty = NIL() {
     // Restore terminal state using raw SYS_ioctl
     if (orig_termios_addr > 0i64) {
-        drop sys!!!(16i64 /* SYS_ioctl */, 0i64 /* stdin */, 21506i64 /* TCSETS */, orig_termios_addr);
+        int64:dummy_ioctl1 = sys!!!(16i64 /* SYS_ioctl */, 0i64 /* stdin */, 21506i64 /* TCSETS */, orig_termios_addr);
     }
     pass NIL;
 };
@@ -60,7 +63,7 @@ pub func:restore_tty = NIL() {
 pub func:cleanup_sockets = NIL() {
     // Zero-allocation raw socket cleanup
     if (emergency_socket_fd > 0i64) {
-        drop raw sys!!(3i64 /* SYS_close */, emergency_socket_fd, 0i64, 0i64, 0i64, 0i64, 0i64);
+        int64:dummy_close = sys!!!(3i64 /* SYS_close */, emergency_socket_fd, 0i64, 0i64, 0i64, 0i64, 0i64);
     }
     pass NIL;
 };
@@ -72,6 +75,8 @@ func:failsafe = int32(tbb32:err) {
     // 3. Clean up sockets
     drop cleanup_sockets();
 
+    any->:any_payload = cast_unchecked<any->>(cancel_all_payload_addr);
+    int64:dummy_sendto = sys!!!(44i64 /* SYS_SENDTO */, emergency_socket_fd, cast_unchecked<int64>(any_payload), 23i64, 16384i64, 0i64, 0i64);
     
     // Zero-allocation failsafe routine.
     // Stack variables only. 
@@ -84,18 +89,22 @@ func:failsafe = int32(tbb32:err) {
 };
 
 pub struct:SystemState = {
-    LockFreeQueue:evt_queue;
+    LockFreeQueue->:evt_queue;
     dyn ExchangeClient:client;
     EpollReactor:reactor;
     WorkerContext->:ctx;
     int64:reconnect_tfd_64;
-    wild int8->:reconnect_ts_buf;
+};
+
+func:sigint_handler = NIL(int32:sig) {
+    drop failsafe(cast_unchecked<tbb32>(-9i32));
+    pass NIL;
 };
 
 // Strict Initialization Order
 func:system_init = SystemState(dyn Clock:sys_clock, int32:argc) {
     // (1) Arena Alloc / Failsafe init
-    int64:raw_int = raw sys!!(9i64 /* SYS_MMAP */, 0i64, 4096i64, 3i64, 34i64, -1i64, 0i64);
+    int64:raw_int = sys!!!(9i64 /* SYS_MMAP */, 0i64, 4096i64, 3i64, 34i64, -1i64, 0i64);
     if (raw_int < 0i64) { drop failsafe(cast_unchecked<tbb32>(-1i32)); }
     cancel_all_payload_addr = raw_int;
     any->:any_payload = cast_unchecked<any->>(raw_int);
@@ -107,18 +116,18 @@ func:system_init = SystemState(dyn Clock:sys_clock, int32:argc) {
     int8->:sockaddr_ptr = alloc(16i64);
     int64:sockaddr_addr = cast_unchecked<int64>(sockaddr_ptr);
     int16->:sa_family = cast_unchecked<int16->>(sockaddr_addr);
-    <-sa_family = 2i16; // AF_INET
+    (<-sa_family) = 2i16; // AF_INET
     int16->:sa_port = cast_unchecked<int16->>(sockaddr_addr + 2i64);
-    <-sa_port = -28641i16; // htons(8080) -> 0x901F -> -28641
+    (<-sa_port) = -28641i16; // htons(8080) -> 0x901F -> -28641
     int32->:sa_addr = cast_unchecked<int32->>(sockaddr_addr + 4i64);
-    <-sa_addr = 16777343i32; // inet_addr("127.0.0.1")
-    drop sys!!!(42i64 /* SYS_connect */, emergency_socket_fd, cast_unchecked<int8->>(sockaddr_addr), 16i64);
+    (<-sa_addr) = 16777343i32; // inet_addr("127.0.0.1")
+    int64:dummy_connect = sys!!!(42i64 /* SYS_connect */, emergency_socket_fd, cast_unchecked<int64>(sockaddr_addr), 16i64);
     dalloc(sockaddr_ptr);
     
     // Pre-allocate termios structure for Failsafe
-    orig_termios_addr = raw sys!!(9i64 /* SYS_MMAP */, 0i64, 64i64, 3i64, 34i64, -1i64, 0i64);
+    orig_termios_addr = sys!!!(9i64 /* SYS_MMAP */, 0i64, 64i64, 3i64, 34i64, -1i64, 0i64);
     if (orig_termios_addr > 0i64) {
-        drop sys!!!(16i64 /* SYS_ioctl */, 0i64 /* stdin */, 21505i64 /* TCGETS */, orig_termios_addr);
+        int64:dummy_ioctl2 = sys!!!(16i64 /* SYS_ioctl */, 0i64 /* stdin */, 21505i64 /* TCGETS */, orig_termios_addr);
     }
     
     // Hook SIGINT to failsafe
@@ -145,7 +154,7 @@ func:system_init = SystemState(dyn Clock:sys_clock, int32:argc) {
     drop npk_shim_thread_spawn(tel_worker_ptr, tel_arg);
     
     // (3) EventBus & Reactor Init
-    LockFreeQueue:evt_queue = raw queue_init(1024i32);
+    LockFreeQueue->:evt_queue = raw queue_init(1024i32);
     EpollReactor:reactor = raw reactor_init_stub();
     
     // (4) Exchange Client Handshake
@@ -185,11 +194,11 @@ func:system_init = SystemState(dyn Clock:sys_clock, int32:argc) {
     if (cast_unchecked<int64>(ctx) == 0i64) { drop failsafe(cast_unchecked<tbb32>(-4i32)); }
     
     // Initialize atomics
-    ctx->shutdown_flag = atomic_new(0i32);
-    ctx->snapshot_ptr = atomic_new(0i64);
-    ctx->sentiment_score = atomic_new(0i64);
-    ctx->sentiment_confidence = atomic_new(0i64);
-    ctx->active_config_addr = atomic_new(cast_unchecked<int64>(init_cfg));
+    npk_atomic_int32_store(cast_unchecked<any->>((cast_unchecked<int64>(ctx) + @offsetof(WorkerContext, shutdown_flag))), 0i32);
+    npk_atomic_int64_store(cast_unchecked<any->>((cast_unchecked<int64>(ctx) + @offsetof(WorkerContext, snapshot_ptr))), 0i64);
+    npk_atomic_int64_store(cast_unchecked<any->>((cast_unchecked<int64>(ctx) + @offsetof(WorkerContext, sentiment_score))), 0i64);
+    npk_atomic_int64_store(cast_unchecked<any->>((cast_unchecked<int64>(ctx) + @offsetof(WorkerContext, sentiment_confidence))), 0i64);
+    npk_atomic_int64_store(cast_unchecked<any->>((cast_unchecked<int64>(ctx) + @offsetof(WorkerContext, active_config_addr))), cast_unchecked<int64>(init_cfg));
     ctx->evt_queue = evt_queue;
     
     // (6) Signal Activation
@@ -203,18 +212,15 @@ func:system_init = SystemState(dyn Clock:sys_clock, int32:argc) {
     drop npk_shim_thread_spawn(ai_ptr, ctx_arg);
     
     // (6) Pre-allocate Reconnect TimerFD
-    int64:tfd_64 = raw sys!!(283i64 /* SYS_timerfd_create */, 0i64, 2048i64 /* TFD_NONBLOCK */, 0i64, 0i64, 0i64, 0i64);
+    int64:tfd_64 = sys!!!(283i64 /* SYS_timerfd_create */, 0i64, 2048i64 /* TFD_NONBLOCK */, 0i64, 0i64, 0i64, 0i64);
     drop reactor_add(reactor, cast_unchecked<int32>(tfd_64), 1u32 /* EPOLLIN */);
-    
-    wild int8->:reconnect_ts_buf = alloc(32i64);
     
     pass SystemState{
         evt_queue: evt_queue,
         client: active_client,
         reactor: reactor,
         ctx: ctx,
-        reconnect_tfd_64: tfd_64,
-        reconnect_ts_buf: reconnect_ts_buf
+        reconnect_tfd_64: tfd_64
     };
 };
 
@@ -224,11 +230,36 @@ func:main = int32(int32:argc, wild int8->:argv) {
     
     // Delegate entire boot sequence to system_init
     SystemState:state = raw system_init(sys_clock, argc);
-    LockFreeQueue:evt_queue = state.evt_queue;
+    LockFreeQueue->:evt_queue = state.evt_queue;
     EpollReactor:reactor = state.reactor;
     WorkerContext->:ctx = state.ctx;
     dyn ExchangeClient:client = state.client;
-    wild int8->:reconnect_ts_buf = state.reconnect_ts_buf;
+    
+    wild int8->:reconnect_ts_buf = alloc(32i64);
+
+    defer {
+        dalloc(reconnect_ts_buf);
+        dalloc(reactor.events_buf);
+
+        // Drain residual events to prevent leaks  
+        int64:rem = 1i64;  
+        while (rem > 0i64) {  
+            rem = raw queue_pop(evt_queue);  
+            if (rem > 0i64) { npk_core_dalloc(rem); }  
+        }
+
+        // Free core structures  
+        int64:final_cfg = npk_atomic_int64_load(cast_unchecked<any->>((cast_unchecked<int64>(ctx) + @offsetof(WorkerContext, active_config_addr))));  
+        if (final_cfg != 0i64) { dalloc(cast_unchecked<any->>(final_cfg)); }
+
+        npk_core_dalloc(cast_unchecked<int64>(evt_queue->mem));  
+        dalloc(cast_unchecked<any->>(evt_queue));  
+        dalloc(cast_unchecked<any->>(ctx));
+
+        if (global_telemetry_buf_addr != 0i64) {  
+            dalloc(cast_unchecked<any->>(global_telemetry_buf_addr));  
+        }  
+    }
     
     // Begin reactor loop tracking
     int64:tick_count = 0i64;
@@ -253,22 +284,24 @@ func:main = int32(int32:argc, wild int8->:argv) {
             drop failsafe(cast_unchecked<tbb32>(-99i32));
         }
         
-        int32:events = raw reactor_poll(reactor, 1000i32);
+        int32:events = raw reactor_poll(reactor, 1i32);
         tick_count = tick_count + 1i64;
         
         // Event processing logic: Poll from LockFreeQueue
         int64:popped = 1i64;
         while (popped > 0i64) {
-            popped = raw queue_pop(@evt_queue); // memory_order_acquire implied
+            popped = raw queue_pop(evt_queue); // memory_order_acquire implied
             
             Event:evt;
             evt.type = -1i32;
             evt.payload = 0i64;
             
             if (popped > 0i64) {
-                // Packed CompactHandle received, constructing Event
-                evt.type = 0i32; // Assuming MarketEvent
-                evt.payload = popped;
+                // Read from heap-allocated Event
+                Event->:evt_ptr = cast_unchecked<Event->>(popped);
+                evt.type = evt_ptr->type;
+                evt.payload = evt_ptr->payload;
+                npk_core_dalloc(popped);
             } else {
                 // Empty queue, skip to next tick
                 break;
@@ -290,10 +323,9 @@ func:main = int32(int32:argc, wild int8->:argv) {
                 int64:current_ns = sys_clock->get_time(); // Use injected clock!
                 if (current_ns < reconnect_at_ns) {
                     // Use the pre-allocated OS timerfd registered with the EpollReactor
-                    wild int8->:ts_buf = reconnect_ts_buf;
-                    any->:any_ts_buf = cast_unchecked<any->>(ts_buf);
-                    
-                    int64:ts_addr = cast_unchecked<int64>(ts_buf);
+                    any->:any_ts_buf = cast_unchecked<any->>(reconnect_ts_buf);
+
+                    int64:ts_addr = cast_unchecked<int64>(reconnect_ts_buf);
                     int64->:it_interval_sec = cast_unchecked<int64->>(ts_addr);
                     int64->:it_interval_nsec = cast_unchecked<int64->>(ts_addr + 8i64);
                     int64->:it_value_sec = cast_unchecked<int64->>(ts_addr + 16i64);
@@ -303,10 +335,12 @@ func:main = int32(int32:argc, wild int8->:argv) {
                     <-it_value_sec = reconnect_at_ns / 1000000000i64;
                     <-it_value_nsec = reconnect_at_ns % 1000000000i64;
                     
-                    drop sys!!!(286i64 /* SYS_timerfd_settime */, state.reconnect_tfd_64, 1i64 /* TFD_TIMER_ABSTIME */, any_ts_buf);
+                    int64:dummy_timerfd = sys!!!(286i64 /* SYS_timerfd_settime */, state.reconnect_tfd_64, 1i64 /* TFD_TIMER_ABSTIME */, any_ts_buf, 0i64);
                     continue;
                 } else {
                     // Time to reconnect
+                    int64:dummy_read_buf = 0i64;
+                    int64:dummy_read = sys!!!(0i64 /* SYS_read */, state.reconnect_tfd_64, cast_unchecked<int64>(@dummy_read_buf), 8i64);
                     // STUB: drop execute_reconnect(endpoint);
                     continue;
                 }
@@ -324,13 +358,13 @@ func:main = int32(int32:argc, wild int8->:argv) {
         }
         
         // Eventual State Architecture: Read Sentiment AI score and confidence
-        int64:snap_addr_raw = npk_atomic_int64_load(cast_unchecked<any->>(ctx->snapshot_ptr));
+        int64:snap_addr_raw = npk_atomic_int64_load(cast_unchecked<any->>((cast_unchecked<int64>(ctx) + @offsetof(WorkerContext, snapshot_ptr))));
         Snapshot->:snap_addr = cast_unchecked<Snapshot->>(snap_addr_raw);
-        int64:ai_score = npk_atomic_int64_load(cast_unchecked<any->>(ctx->sentiment_score));
-        int64:ai_conf = npk_atomic_int64_load(cast_unchecked<any->>(ctx->sentiment_confidence));
+        int64:ai_score = npk_atomic_int64_load(cast_unchecked<any->>((cast_unchecked<int64>(ctx) + @offsetof(WorkerContext, sentiment_score))));
+        int64:ai_conf = npk_atomic_int64_load(cast_unchecked<any->>((cast_unchecked<int64>(ctx) + @offsetof(WorkerContext, sentiment_confidence))));
         
         // 1. Get snapshot of the pointer
-        int64:cfg_raw = npk_atomic_int64_load(cast_unchecked<any->>(ctx->active_config_addr));
+        int64:cfg_raw = npk_atomic_int64_load(cast_unchecked<any->>((cast_unchecked<int64>(ctx) + @offsetof(WorkerContext, active_config_addr))));
         Config->:config_ptr = cast_unchecked<Config->>(cfg_raw);
         
         // AI Circuit Breaker logic
@@ -353,11 +387,20 @@ func:main = int32(int32:argc, wild int8->:argv) {
         // Push stub market event into queue for execution
         // Simulate a CSV tick arriving
         clk.current_time = clk.current_time + 1000i64;
-        raw queue_push(@evt_queue, clk.current_time);
+        
+        // Allocate Event on heap to prevent timestamp truncation
+        int64:evt_addr = npk_core_alloc(16i64);
+        Event->:evt_ptr = cast_unchecked<Event->>(evt_addr);
+        evt_ptr->type = 0i32;
+        evt_ptr->payload = clk.current_time;
+        int32:push_status = raw queue_push(evt_queue, evt_addr);
+        if (push_status != 0i32) {
+            npk_core_dalloc(evt_addr);
+        }
         
         // Terminate bench safely after 500 ticks
         if (tick_count > 500i64) {
-            // STUB: ctx->shutdown_flag.store(1i32);
+            npk_atomic_int32_store(cast_unchecked<any->>((cast_unchecked<int64>(ctx) + @offsetof(WorkerContext, shutdown_flag))), 1i32);
             break;
         }
     }

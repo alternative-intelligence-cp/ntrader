@@ -21,10 +21,10 @@ Rules<NitLLMState>:r_ai_memory_cap = { $->allocated_bytes <= 104857600i32 };
 
 extern "libnitpick_runtime" {
     func:npk_core_alloc = int64(int64:size);
-    func:npk_core_dalloc = NIL(int64:ptr);
+    func:npk_core_dalloc = void(int64:ptr);
     // stddbg stub
-    func:npk_stddbg = NIL(void*:msg);
-    func:npk_atomic_int64_store = NIL(void*:atomic_ptr, int64:val);
+    func:npk_stddbg = void(void*:msg);
+    func:npk_atomic_int64_store = void(void*:atomic_ptr, int64:val);
 
 }
 
@@ -73,6 +73,7 @@ pub func:ai_worker_loop = NIL(NitLLMState->:state) {
 
 // Soft-fail allocation for nitllm
 pub func:ai_alloc = any->(NitLLMState->:state, int32:size) {
+    if (size <= 0i32) { fail cast_unchecked<tbb32>(1i32); }
     int32:new_size = state->allocated_bytes + size;
     if (new_size > 104857600i32) {
         fail cast_unchecked<tbb32>(1i32); // ERR_OOM
@@ -87,7 +88,7 @@ pub func:ai_alloc = any->(NitLLMState->:state, int32:size) {
 pub func:ai_free = NIL(any->:ptr, int32:size, NitLLMState->:state) {
     int64:raw_int = cast_unchecked<int64>(ptr);
     if (raw_int != 0i64) {
-        drop npk_core_dalloc(raw_int);
+        npk_core_dalloc(raw_int);
         state->allocated_bytes = state->allocated_bytes - size;
     }
     pass NIL;
@@ -96,7 +97,7 @@ pub func:ai_free = NIL(any->:ptr, int32:size, NitLLMState->:state) {
 pub func:ai_cleanup = NIL(NitLLMState->:state) {
     int64:init_ptr = cast_unchecked<int64>(state->tensor_arena);
     if (init_ptr != 0i64) {
-        drop npk_core_dalloc(init_ptr);
+        npk_core_dalloc(init_ptr);
         state->tensor_arena = cast_unchecked<int8->>(0i64);
     }
     pass NIL;

@@ -1,3 +1,4 @@
+func:failsafe = int32(tbb32:err);
 use "unsafe.npk".*;
 
 pub struct:TCBHandle = {
@@ -19,7 +20,7 @@ pub struct:GenNode = {
 pub struct:TCBArena = {
     wild any->:memory;
     int64:capacity;
-    atomic<int64>->:next_free;
+    atomic<int64>:next_free;
     int32:generation;
 };
 
@@ -27,7 +28,7 @@ pub func:tcb_arena_init = TCBArena(int64:count) {
     TCBArena:arena;
     arena.capacity = count;
     arena.memory = cast_unchecked<any->>(calloc(count, @sizeof(OrderNode)));
-    arena.next_free = atomic_new(0i64);
+    npk_atomic_int64_store(cast_unchecked<any->>(cast_unchecked<int64>(@arena) + @offsetof(TCBArena, next_free)), 0i64);
     pass arena;
 };
 

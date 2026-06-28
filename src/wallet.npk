@@ -1,3 +1,4 @@
+func:failsafe = int32(tbb32:err);
 // ---------------------------------------------------------
 // WALLET AND DETERMINISTIC LEDGER
 // ---------------------------------------------------------
@@ -65,6 +66,18 @@ pub func:fix256_to_int64 = int64(fix256->:val_ptr) {
     int64:addr = cast_unchecked<int64>(val_ptr);
     int64->:int_part_ptr = cast_unchecked<int64->>(addr + 16i64);
     int64:lower = <-int_part_ptr;
+    
+    int64->:upper_ptr = cast_unchecked<int64->>(addr + 24i64);
+    int64:upper = <-upper_ptr;
+    if (upper == 0i64) {
+        if (lower < 0i64) { !!!(99tbb32); } // Overflowed int64 positive bounds
+    } else {
+        if (upper == -1i64) {
+            if (lower >= 0i64) { !!!(99tbb32); } // Negative underflow out of sign bit
+        } else {
+            !!!(99tbb32); // Upper bounds exceeded
+        }
+    }
     
     pass lower;
 };

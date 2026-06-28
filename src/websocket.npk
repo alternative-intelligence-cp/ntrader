@@ -1,3 +1,4 @@
+func:failsafe = int32(tbb32:err);
 use "network.npk".*;
 
 pub struct:WebSocket = {
@@ -11,7 +12,7 @@ extern "libc" {
 
 extern "libnitpick_runtime" {
     func:npk_core_alloc = int64(int64:size);
-    func:npk_core_dalloc = NIL(int64:ptr);
+    func:npk_core_dalloc = void(int64:ptr);
 }
 
 pub func:generate_ws_key = string() {

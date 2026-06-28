@@ -1,3 +1,4 @@
+func:failsafe = int32(tbb32:err);
 use "ringbuffer.npk".*;
 use "unsafe.npk".*;
 
@@ -14,7 +15,7 @@ pub func:ema_init = EMA(int32:period) {
     EMA:ema;
     ema.period = period;
     
-    tfp64:p = cast_unchecked<tfp64>(period + 1i32);
+    tfp64:p = (period + 1i32) => tfp64;
     ema.multiplier = 2.0tf64 / p;
     
     ema.history = raw ringbuffer_init();

@@ -21,13 +21,13 @@ pub func:ai_inference_worker = any->(any->:arg) {
     
     while (true) {
         // Check shutdown flag
-        int32:is_shutdown = npk_atomic_int32_load(cast_unchecked<any->>(ctx->shutdown_flag));
+        int32:is_shutdown = npk_atomic_int32_load(cast_unchecked<any->>((cast_unchecked<int64>(ctx) + @offsetof(WorkerContext, shutdown_flag))));
         if (is_shutdown == 1i32) {
             break;
         }
         
         // 1. Get snapshot of the pointer
-        ReadOnlySnapshot:snap = raw snapshot_read(ctx->snapshot_ptr);
+        ReadOnlySnapshot:snap = raw snapshot_read(cast_unchecked<atomic<int64>->>((cast_unchecked<int64>(ctx) + @offsetof(WorkerContext, snapshot_ptr))));
         int64:snap_addr = cast_unchecked<int64>(snap.arena);
         if (snap_addr == 0i64) {
             drop sleep(0i32);
@@ -40,13 +40,13 @@ pub func:ai_inference_worker = any->(any->:arg) {
         if (ai_memory_used > 536870912i64) {
             // Memory cap exceeded. Soft-disable by outputting "unknown" (0) and 0 confidence.
             // Do NOT crash the engine via failsafe.
-            npk_atomic_int64_store(cast_unchecked<any->>(ctx->sentiment_score), 0i64);
-            npk_atomic_int64_store(cast_unchecked<any->>(ctx->sentiment_confidence), 0i64);
+            npk_atomic_int64_store(cast_unchecked<any->>((cast_unchecked<int64>(ctx) + @offsetof(WorkerContext, sentiment_score))), 0i64);
+            npk_atomic_int64_store(cast_unchecked<any->>((cast_unchecked<int64>(ctx) + @offsetof(WorkerContext, sentiment_confidence))), 0i64);
             int32:dummy = 0i32;
         } else {
             // Scaffold: Set sentiment score to 1 (Bullish) and confidence to 80 (80%)
-            npk_atomic_int64_store(cast_unchecked<any->>(ctx->sentiment_score), 1i64);
-            npk_atomic_int64_store(cast_unchecked<any->>(ctx->sentiment_confidence), 80i64);
+            npk_atomic_int64_store(cast_unchecked<any->>((cast_unchecked<int64>(ctx) + @offsetof(WorkerContext, sentiment_score))), 1i64);
+            npk_atomic_int64_store(cast_unchecked<any->>((cast_unchecked<int64>(ctx) + @offsetof(WorkerContext, sentiment_confidence))), 80i64);
             int32:dummy = 1i32;
         }
         

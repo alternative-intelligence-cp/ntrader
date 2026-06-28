@@ -1,3 +1,4 @@
+func:failsafe = int32(tbb32:err);
 use "unsafe.npk".*;
 Rules<int32>:r_ring_bounds = { $ >= 0i32, $ < 1024i32 };
 
@@ -92,6 +93,6 @@ pub func:ringbuffer_average = tfp64(RingBuffer->:rb) {
         pass 0.0tf;
     }
     
-    tfp64:div = cast_unchecked<tfp64>(rb->count);
+    tfp64:div = rb->count => tfp64;
     pass rb->sum / div;
 };

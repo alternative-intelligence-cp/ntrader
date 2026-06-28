@@ -11,9 +11,9 @@
 - **AI Circuit Breakers**: AI LLM integrations are tightly monitored. Memory spills or computational hangs hit a 512MB threshold circuit breaker that softly degrades the LLM output to technical-only indicators, never bringing down the main reactor.
 - **Fail-Safe Master Routines**: Unrecoverable engine panics fall back to a zero-allocation `SYS_MMAP` emergency shutdown sequence, instantly firing hard-coded `AF_INET` TCP payloads to liquidate open positions natively via syscalls.
 
-## Current Audit Release: `0.3.2`
+## Current Audit Release: `0.4.0`
 
-The `a15` cycle of audits has certified NTRADER `0.3.2` as entirely resilient. Thread lifecycle tearing, SSL infinite spins, and memory races have all been mitigated.
+The `a20` cycle of audits has certified NTRADER `0.4.0` as entirely resilient. Thread lifecycle tearing, SSL infinite spins, and memory races have all been mitigated.
 
 ### Building & Testing
 

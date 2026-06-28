@@ -1,3 +1,4 @@
+func:failsafe = int32(tbb32:err);
 use "network.npk".*;
 use "crypto.npk".*;
 use "unsafe.npk".*;
@@ -5,12 +6,15 @@ use "traits.npk".*;
 
 extern "libc" {
     func:clock_gettime = int32(int32:clk_id, void*:tp);
+}
+
+extern "libssl" {
     func:SSL_get_error = int32(void*:ssl, int32:ret);
 }
 
 extern "libnitpick_runtime" {
     func:npk_core_alloc = int64(int64:size);
-    func:npk_core_dalloc = NIL(int64:ptr);
+    func:npk_core_dalloc = void(int64:ptr);
 }
 
 pub struct:RestClient = {
@@ -27,7 +31,7 @@ pub struct:RateLimiter = {
 };
 
 pub func:rest_request = int32(RestClient:client, wild int8->:req_buf, int32:req_len) {
-    int32:ret = SSL_write(client.ssl, req_buf, req_len);
+    int32:ret = SSL_write(client.ssl, cast_unchecked<any->>(req_buf), req_len);
     if (ret <= 0i32) {
         int32:err = SSL_get_error(cast_unchecked<any->>(client.ssl), ret);
         if (err == 2i32 || err == 3i32) {

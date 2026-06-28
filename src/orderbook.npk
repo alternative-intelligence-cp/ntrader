@@ -1,3 +1,4 @@
+func:failsafe = int32(tbb32:err);
 use "arena.npk".*;
 
 pub struct:OrderBookLevel = {

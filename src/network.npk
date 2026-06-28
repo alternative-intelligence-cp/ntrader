@@ -1,3 +1,4 @@
+func:failsafe = int32(tbb32:err);
 // Cycle 0.1.0: TCP/IP & Socket Layer
 
 // System constraints on FFI per user preference:
@@ -48,35 +49,17 @@ pub func:connect_socket = TcpSocket(string:host, int32:port) {
         int64->:res_ptr = cast_unchecked<int64->>(res_buf);
         int64:actual_res = <-res_ptr;
         if (actual_res != 0i64) {
+            int32->:ai_addrlen_ptr = cast_unchecked<int32->>(actual_res + 16i64);
+            int32:ai_addrlen = <-ai_addrlen_ptr;
+            int64->:ai_addr_ptr = cast_unchecked<int64->>(actual_res + 24i64);
+            int64:ai_addr = <-ai_addr_ptr;
+            int32:flags = fcntl(fd, 4i32, 2048i64); // F_SETFL, O_NONBLOCK
+            int32:conn_ret = connect(fd, cast_unchecked<any->>(ai_addr), ai_addrlen);
             drop freeaddrinfo(cast_unchecked<any->>(actual_res));
+            if (conn_ret < 0i32) {} // Ignore EINPROGRESS
         }
     }
     dalloc(res_buf);
-    
-    // "manually packing the 16-byte sockaddr_in"
-    // We use a struct to guarantee exact 16-byte memory layout.
-    // Port needs to be htons() which is just byte-swapping if little-endian.
-    sockaddr_in:addr;
-    addr.sin_family = 2i16;
-    addr.sin_port = 20480u16;
-    addr.sin_addr = 0i32;
-    addr.sin_zero = 0i64;
-    
-    // Non-blocking I/O
-    int32:flags = fcntl(fd, 4i32, 2048i64); // F_SETFL, O_NONBLOCK
-    
-    // connect
-    // To pass 'addr' to connect, we need its memory address.
-    // We can use a stack allocation pointer or just let the caller cast it?
-    // In Nitpick, to pass a struct pointer to void*, we need `&addr`? 
-    // Let's assume there's an address-of operator or we just use `alloc` for `wild int8->` as instructed.
-    
-    int64:addr_ptr = cast_unchecked<int64>(@addr);
-    int32:conn_ret = connect(fd, cast_unchecked<any->>(addr_ptr), 16i32);
-    if (conn_ret < 0i32) {
-        // In non-blocking sockets, connect returns -1 with EINPROGRESS
-        // For simplicity we just ignore EINPROGRESS handling in the stub
-    }
     
     // TCP_NODELAY (Nagle's Disable)
     wild int8->:optval = alloc(4i64);
@@ -107,8 +90,11 @@ pub func:reactor_init_stub = EpollReactor() {
 
 pub func:reactor_add = int32(EpollReactor:reactor, int32:fd, uint32:events) {
     wild int8->:ev_buf = alloc(16i64);
-    
-    // We would manually pack events (uint32) and data (uint64) into ev_buf here
+    int64:ev_addr = cast_unchecked<int64>(ev_buf);
+    int32->:events_ptr = cast_unchecked<int32->>(ev_addr);
+    <-events_ptr = cast_unchecked<int32>(events);
+    int64->:data_ptr = cast_unchecked<int64->>(ev_addr + 8i64);
+    <-data_ptr = cast_unchecked<int64>(fd);
     
     int32:ret = epoll_ctl(reactor.epfd, 1i32, fd, ev_buf); // EPOLL_CTL_ADD = 1
     dalloc(ev_buf);
