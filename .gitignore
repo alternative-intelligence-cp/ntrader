@@ -12,3 +12,4 @@ a.out
 # Standard OS files
 .DS_Store
 Thumbs.db
+.nitpick_make/
